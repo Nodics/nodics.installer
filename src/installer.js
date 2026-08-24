@@ -18,7 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const REBRAND_STAGE_VERSION = VERSION + ':project-runtime-identity-v5';
 const START_STAGE_VERSION = VERSION + ':detached-topology-start-v1';
 const VALID_JOURNEYS = new Set(['reference', 'project']);
@@ -171,9 +171,18 @@ const installer = {
         return lowerCamel.charAt(0).toUpperCase() + lowerCamel.slice(1);
     },
 
+    toDockerIdentifier: function (value, fallback) {
+        return String(value || fallback || 'my-nodics-app')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'my-nodics-app';
+    },
+
     createApplicationIdentity: function (options) {
         const title = this.toApplicationTitle(options.applicationName);
         const slug = this.toApplicationSlug(options.applicationName);
+        const dockerSlug = this.toDockerIdentifier(slug);
         const projectSlug = this.toApplicationSlug(options.projectName || slug + '.project');
         const commerceSlug = this.toApplicationSlug(options.commerceSiteName || slug + '-apparel');
         const companySlug = this.toApplicationSlug(options.companySiteName || slug);
@@ -191,6 +200,9 @@ const installer = {
             integrationModuleName: modulePrefix + 'Int',
             localEnvironmentName: modulePrefix + 'Local',
             dockerLocalEnvironmentName: modulePrefix + 'DockerLocal',
+            dockerSlug,
+            dockerComposeProjectName: 'nodics-' + dockerSlug + '-docker-local',
+            dockerBackendImageName: 'nodics/' + dockerSlug + '-backend',
             companySiteName: companySlug,
             companySiteTitle: this.toDisplayTitle(options.companySiteName, title),
             companySitePath: path.join(options.workspace, companySlug),
@@ -876,6 +888,31 @@ const installer = {
                 checks.push({ code: 'docker', required: false, status: 'skipped' });
                 continue;
             }
+            if (prerequisite.code === 'docker') {
+                const version = this.runCommand('docker', ['--version'], { cwd: process.cwd(), allowFailure: true });
+                if (version.status !== 'passed') {
+                    checks.push({
+                        code: 'docker',
+                        required: prerequisite.required,
+                        status: 'failed',
+                        version: version.stderr.trim(),
+                        fix: 'Install Docker Desktop or make `docker` available on PATH.'
+                    });
+                    continue;
+                }
+                const daemon = this.runCommand('docker', ['info', '--format', '{{.ServerVersion}}'], {
+                    cwd: process.cwd(),
+                    allowFailure: true
+                });
+                checks.push({
+                    code: 'docker',
+                    required: prerequisite.required,
+                    status: daemon.status,
+                    version: version.stdout.trim() + (daemon.status === 'passed' ? ' daemon ' + daemon.stdout.trim() : ''),
+                    fix: daemon.status === 'passed' ? undefined : 'Start Docker Desktop or set NODICS_DOCKER_BIN before Docker Local start.'
+                });
+                continue;
+            }
             const [executable, commandArgs] = commandMap[prerequisite.code];
             if (!executable) {
                 continue;
@@ -1136,6 +1173,11 @@ const installer = {
 
     rebrandProjectFiles: function (projectPath, options) {
         const replacements = [
+            ['nodics-kickoff-docker-local', options.application.dockerComposeProjectName],
+            ['nodics/kickoff-backend', options.application.dockerBackendImageName],
+            ['nodics.exp/nodics.axis', 'nodics.axis'],
+            ['nodics.exp/nodics.nexus', options.application.companySiteName],
+            ['nodics.exp/nodics.agora', options.application.commerceSiteName],
             ['kickoffDockerLocal', options.application.dockerLocalEnvironmentName],
             ['kickoffLocal', options.application.localEnvironmentName],
             ['kickoffCore', options.application.coreModuleName],
@@ -1306,6 +1348,8 @@ const installer = {
             integrationModuleName: options.application.integrationModuleName,
             localEnvironmentName: options.application.localEnvironmentName,
             dockerLocalEnvironmentName: options.application.dockerLocalEnvironmentName,
+            dockerComposeProjectName: options.application.dockerComposeProjectName,
+            dockerBackendImageName: options.application.dockerBackendImageName,
             companySiteName: options.application.companySiteName,
             commerceSiteName: options.application.commerceSiteName
         };
@@ -1484,6 +1528,117 @@ const installer = {
         return options.mode === 'docker' ?
             this.runProjectCommand(options, 'docker-local:acceptance', [], false) :
             this.runProjectCommand(options, 'acceptance:local:fresh', [], false);
+    },
+
+    collectFiles: function (rootPath, matcher, maxFiles) {
+        const files = [];
+        const visit = currentPath => {
+            if (files.length >= maxFiles || !fs.existsSync(currentPath)) {
+                return;
+            }
+            const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+            entries.forEach(entry => {
+                if (files.length >= maxFiles) {
+                    return;
+                }
+                const entryPath = path.join(currentPath, entry.name);
+                if (entry.isDirectory()) {
+                    visit(entryPath);
+                    return;
+                }
+                if (entry.isFile() && matcher(entryPath)) {
+                    files.push(entryPath);
+                }
+            });
+        };
+        visit(rootPath);
+        return files;
+    },
+
+    collectImportErrorArtifacts: function (options) {
+        const importRoot = path.join(
+            options.application.projectPath,
+            'envs',
+            options.application.localEnvironmentName,
+            'wcmsStagedServer',
+            'temp',
+            'import'
+        );
+        return this.collectFiles(importRoot, filePath => filePath.includes(path.sep + 'error' + path.sep), 20);
+    },
+
+    diagnoseOperationalFailure: function (error, options, operation) {
+        const commandResult = error && error.commandResult ? error.commandResult : null;
+        const text = [
+            error && error.message,
+            commandResult && commandResult.stdout,
+            commandResult && commandResult.stderr
+        ].filter(Boolean).join('\n');
+        const artifacts = this.collectImportErrorArtifacts(options);
+        const artifactEvidence = artifacts.map(filePath => {
+            let content = '';
+            try {
+                content = fs.readFileSync(filePath, 'utf8').slice(0, 4000);
+            } catch (readError) {
+                content = '';
+            }
+            return filePath + '\n' + content;
+        }).join('\n');
+        if (/Media reference was not found|agoraComponentMediaData/.test(text + '\n' + artifactEvidence)) {
+            return {
+                code: 'media-reference-missing',
+                summary: 'Guided initialization reached WCMS component media data before its media references were available.',
+                evidence: artifacts,
+                nextSteps: [
+                    'Review the WCMS Staged import error artifact listed below.',
+                    'Run logs for WCMS Staged with --action=logs --runtime=wcmsStaged --lines=120.',
+                    'Clean generated runtime state only after stopping the topology, then rerun initialize.',
+                    'If the same media-reference error repeats on a fresh runtime, fix the accelerator data-pack import order or missing media reference seed data.'
+                ]
+            };
+        }
+        if (/record-level errors|temp\/import|import\/core\/error/i.test(text) || artifacts.length > 0) {
+            return {
+                code: 'import-record-errors',
+                summary: 'A data import command finished with record-level errors.',
+                evidence: artifacts,
+                nextSteps: [
+                    'Open the listed import error artifact to find the failing data file and record.',
+                    'Run logs for the failing runtime with --action=logs --runtime=wcmsStaged --lines=120.',
+                    'Resolve the data issue, then rerun initialize or acceptance.'
+                ]
+            };
+        }
+        return {
+            code: operation + '-command-failed',
+            summary: 'The project command failed before the installer could complete this operation.',
+            evidence: artifacts,
+            nextSteps: [
+                'Read the command, exit code, and stderr in the JSON output or terminal text.',
+                'Run --action=doctor to re-check prerequisite software and busy ports.',
+                'Run --action=logs --lines=120 to inspect the latest topology logs.'
+            ]
+        };
+    },
+
+    runOperationalStep: function (options, operation, callback) {
+        try {
+            return callback();
+        } catch (error) {
+            const commandResult = error && error.commandResult ? error.commandResult : null;
+            return {
+                status: 'failed',
+                operation,
+                command: commandResult && commandResult.command,
+                cwd: commandResult && commandResult.cwd,
+                exitCode: commandResult && commandResult.exitCode,
+                stdout: commandResult && commandResult.stdout,
+                stderr: commandResult && commandResult.stderr,
+                error: error && error.message ? this.sanitizeOutput(error.message) : String(error),
+                diagnosis: this.diagnoseOperationalFailure(error, options, operation),
+                finishedAt: new Date().toISOString()
+            };
+        }
     },
 
     readProjectDescriptor: function (options) {
@@ -1834,6 +1989,51 @@ const installer = {
         return lines.join('\n');
     },
 
+    renderPreflight: function (result) {
+        const lines = [
+            'Nodics Installer preflight ' + (result.ok ? 'passed' : 'failed')
+        ];
+        result.checks.forEach(check => {
+            lines.push('- ' + check.code + ': ' + check.status);
+            if (check.fix) {
+                lines.push('  fix: ' + check.fix);
+            }
+            if (check.busy) {
+                lines.push('  fix: stop the process using this local port, or change the local port configuration before start.');
+            }
+        });
+        return lines.join('\n');
+    },
+
+    renderOperationalAction: function (label, step) {
+        const lines = [
+            label + (step.status === 'passed' ? ' completed' : ' failed'),
+            'Status: ' + step.status
+        ];
+        if (step.command) {
+            lines.push('Command: ' + step.command);
+        }
+        if (step.exitCode !== undefined && step.exitCode !== null) {
+            lines.push('Exit code: ' + step.exitCode);
+        }
+        if (step.diagnosis) {
+            lines.push('', 'Diagnosis: ' + step.diagnosis.summary);
+            if (step.diagnosis.evidence && step.diagnosis.evidence.length) {
+                lines.push('', 'Evidence:');
+                step.diagnosis.evidence.forEach(filePath => lines.push('- ' + filePath));
+            }
+            lines.push('', 'Next steps:');
+            step.diagnosis.nextSteps.forEach(nextStep => lines.push('- ' + nextStep));
+        }
+        if (step.stderr) {
+            const stderr = step.stderr.trim().split('\n').slice(-8).join('\n');
+            if (stderr) {
+                lines.push('', 'Last stderr lines:', stderr);
+            }
+        }
+        return lines.join('\n');
+    },
+
     run: async function (args, runtime) {
         if (this.hasFlag(args, '--help')) {
             console.log(this.usage());
@@ -1856,9 +2056,10 @@ const installer = {
         }
         if (options.action === 'preflight') {
             const result = await this.preflight(plan, options);
-            this.printResult(options, result, preflight =>
-                'Nodics Installer preflight ' + (preflight.ok ? 'passed' : 'failed') + '\n' +
-                preflight.checks.map(check => '- ' + check.code + ': ' + check.status).join('\n'));
+            if (!result.ok) {
+                process.exitCode = 1;
+            }
+            this.printResult(options, result, preflight => this.renderPreflight(preflight));
             return true;
         }
         if (options.action === 'doctor') {
@@ -1894,16 +2095,22 @@ const installer = {
         }
         if (options.action === 'initialize') {
             const start = await this.ensureTopologyStarted(options);
-            const initialize = this.runGuidedInitialization(options);
+            const initialize = this.runOperationalStep(options, 'initialize', () => this.runGuidedInitialization(options));
             const result = { operation: 'local-setup-initialize', ok: initialize.status === 'passed', start, initialize };
-            this.printResult(options, result, init => 'Nodics guided initialization completed\nStatus: ' + init.initialize.status);
+            if (!result.ok) {
+                process.exitCode = 1;
+            }
+            this.printResult(options, result, init => this.renderOperationalAction('Nodics guided initialization', init.initialize));
             return true;
         }
         if (options.action === 'acceptance') {
             const start = await this.ensureTopologyStarted(options);
-            const acceptance = this.runAcceptanceChecks(options);
+            const acceptance = this.runOperationalStep(options, 'acceptance', () => this.runAcceptanceChecks(options));
             const result = { operation: 'local-setup-acceptance', ok: acceptance.status === 'passed', start, acceptance };
-            this.printResult(options, result, accepted => 'Nodics acceptance completed\nStatus: ' + accepted.acceptance.status);
+            if (!result.ok) {
+                process.exitCode = 1;
+            }
+            this.printResult(options, result, accepted => this.renderOperationalAction('Nodics acceptance', accepted.acceptance));
             return true;
         }
         if (options.action === 'clean') {

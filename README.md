@@ -49,6 +49,36 @@ npm start
 npm test
 ```
 
+## How `npx` Finds The Installer
+
+`npx` does not automatically map `@nodics/installer` to the GitHub repository
+`Nodics/nodics.installer`.
+
+There are two supported bootstrap forms:
+
+```bash
+npx github:Nodics/nodics.installer
+```
+
+This downloads and runs the public GitHub repository directly. It works before
+the installer is published to npm.
+
+```bash
+npx @nodics/installer
+```
+
+This will work only after Nodics publishes an npm package named
+`@nodics/installer` under the `@nodics` npm scope. At that point npm is the
+registry of record, and the package can still point back to this GitHub
+repository through its package metadata.
+
+The current enterprise-safe publication decision is:
+
+1. use `npx github:Nodics/nodics.installer` for public GitHub bootstrap now;
+2. keep the repository named `nodics.installer`;
+3. publish `@nodics/installer` later when the Nodics npm organization, package
+   ownership, release signing, and support policy are ready.
+
 ## Prerequisite Software
 
 The installer can print a plan with only Node.js and npm available, but a proper
@@ -363,6 +393,11 @@ Expected URLs use the Docker Local port range, for example Axis at
 `http://localhost:4100`, company site at `http://localhost:4200`, commerce site
 at `http://localhost:4300`, and Platform at `http://localhost:5300`.
 
+Docker Local uses the application name for the compose and backend image
+identity. For `Acme`, the installer rewrites the Docker template to use names
+such as `nodics-acme-docker-local` and `nodics/acme-backend:docker-local`
+instead of Kickoff-owned Docker names.
+
 ## Enterprise Options
 
 Enterprise options are recorded in the plan and used where supported:
@@ -397,6 +432,141 @@ The evidence contains:
 
 Secrets are sanitized from command output before evidence is written.
 
+## Troubleshooting
+
+Start with the least destructive checks:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=status \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=doctor \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+If a port is busy, stop the process that owns the port or change the project
+topology port before starting again. The default Node Local ports are
+`3100`, `3200`, `3300`, `4300`, `4312`, `4314`, `4330`, `4340`, and `4350`.
+Docker Local uses `4100`, `4200`, `4300`, `5300`, `5312`, `5314`, `5330`,
+`5340`, and `5350`.
+
+If MongoDB, Redis, or Elasticsearch are missing, install or start only the
+services required by the selected local profile, then rerun:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=doctor \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+If a repository already exists and the installer refuses it as dirty, commit,
+stash, or move the local changes yourself. The installer will not reset or
+overwrite a dirty checkout.
+
+If startup is confusing, inspect recent logs:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=logs \
+  --runtime=wcmsStaged \
+  --lines=120 \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+If guided initialization fails with a message like `Media reference was not
+found` or `agoraComponentMediaData`, the WCMS component media data was imported
+before its matching media references were available. The installer reports this
+as `media-reference-missing` and lists import error files under:
+
+```text
+<project>/envs/<application>Local/wcmsStagedServer/temp/import/**/error/
+```
+
+Review the listed file, stop the topology, clean generated runtime state, start
+again, and rerun initialization:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=stop \
+  --yes \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+
+npx github:Nodics/nodics.installer \
+  --action=clean \
+  --yes \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+
+npx github:Nodics/nodics.installer \
+  --action=start \
+  --yes \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+
+npx github:Nodics/nodics.installer \
+  --action=initialize \
+  --yes \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+If the same media-reference error repeats on a fresh runtime, the accelerator
+data pack needs a source fix in its import order or missing media reference seed
+data. Treat that as a framework/application data issue, not a local machine
+setup issue.
+
+For Docker Local, first confirm Docker Desktop is running:
+
+```bash
+docker info
+```
+
+Then run Docker preflight from the customer project through the installer:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --mode=docker \
+  --action=preflight \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
 ## Safety Rules
 
 The installer follows these rules:
@@ -411,7 +581,8 @@ The installer follows these rules:
 
 ## Current Status
 
-Version `0.5.0` implements the multi-site application identity and local operations setup contract:
+Version `0.6.0` implements the multi-site application identity, Docker identity
+cleanup, and local operations setup contract:
 
 - guided option parsing and questionnaire support;
 - named backend project, company site, and commerce site setup planning;
@@ -425,6 +596,7 @@ Version `0.5.0` implements the multi-site application identity and local operati
 - dependency install orchestration;
 - resumable setup evidence;
 - status, logs, start, stop, restart, initialize, acceptance, repair, clean, and version actions;
+- structured beginner diagnostics for initialization and acceptance command failures;
 - module-shaped repository compliance tests.
 
 The full runtime stack was not started during repository tests. The test suite

@@ -25,7 +25,7 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
     const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     const nodicsRoot = require('../nodics');
     assert.equal(packageJson.main, 'nodics.js');
-    assert.equal(packageJson.version, '0.5.0');
+    assert.equal(packageJson.version, '0.6.0');
     assert.equal(packageJson.nodics.kind, 'tooling');
     assert.equal(packageJson.nodics.displayName, 'Nodics Installer');
     assert.equal(packageJson.nodics.runtimeModule, false);
@@ -56,7 +56,7 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.dryRun, true);
     assert.equal(plan.writePerformed, false);
     assert.equal(plan.executionSupported, true);
-    assert.equal(plan.installer.version, '0.5.0');
+    assert.equal(plan.installer.version, '0.6.0');
     assert.equal(plan.installer.bootstrapCommand, 'npx github:Nodics/nodics.installer');
     assert.equal(plan.beginnerChoices.application.name, 'Acme');
     assert.equal(plan.beginnerChoices.application.code, 'acme');
@@ -66,6 +66,8 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.beginnerChoices.application.integrationModuleName, 'acmeInt');
     assert.equal(plan.beginnerChoices.application.localEnvironmentName, 'acmeLocal');
     assert.equal(plan.beginnerChoices.application.dockerLocalEnvironmentName, 'acmeDockerLocal');
+    assert.equal(plan.beginnerChoices.application.dockerComposeProjectName, 'nodics-acme-docker-local');
+    assert.equal(plan.beginnerChoices.application.dockerBackendImageName, 'nodics/acme-backend');
     assert.equal(plan.beginnerChoices.application.companySitePath, '/tmp/nodicsRoot/acme');
     assert.equal(plan.beginnerChoices.application.commerceSitePath, '/tmp/nodicsRoot/acme-apparel');
     assert.deepEqual(plan.accelerator.domains, ['common', 'apparel']);
@@ -215,6 +217,38 @@ test('preflight reports command and port checks without mutating repositories', 
     assert(!fs.existsSync(path.join(workspace, 'nodics.ai')));
 });
 
+test('docker preflight requires a running Docker daemon', async () => {
+    const workspace = path.join(os.tmpdir(), 'nodics-installer-docker-preflight-test');
+    const options = installer.parseOptions(['--workspace=' + workspace, '--mode=docker', '--action=preflight']);
+    const plan = installer.createSetupPlan(options);
+    const service = {
+        ...installer,
+        runCommand: (executable, args) => {
+            if (executable === 'docker' && args[0] === 'info') {
+                return {
+                    command: 'docker info --format {{.ServerVersion}}',
+                    status: 'failed',
+                    stdout: '',
+                    stderr: 'Cannot connect to the Docker daemon'
+                };
+            }
+            return {
+                command: executable + ' ' + args.join(' '),
+                status: 'passed',
+                stdout: executable === 'docker' ? 'Docker version 29.7.2\n' : 'ok\n',
+                stderr: ''
+            };
+        },
+        portListening: async () => false
+    };
+    const result = await service.preflight(plan, options);
+    const docker = result.checks.find(check => check.code === 'docker');
+    assert.equal(result.ok, false);
+    assert.equal(docker.status, 'failed');
+    assert.match(docker.fix, /Start Docker Desktop/);
+    assert.match(service.renderPreflight(result), /Start Docker Desktop/);
+});
+
 test('execute writes resumable evidence with injected stages', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-execute-'));
     const options = installer.parseOptions([
@@ -287,6 +321,19 @@ test('rebrand rewrites generated topology frontend roots', () => {
     fs.mkdirSync(dockerPath, { recursive: true });
     fs.writeFileSync(path.join(dockerPath, 'backend.Dockerfile'),
         'ENV=kickoffDockerLocal\nCOPY nodics.kickoff /workspace/nodics.kickoff\n');
+    fs.writeFileSync(path.join(dockerPath, 'compose.yaml'), [
+        'name: nodics-kickoff-docker-local',
+        'x-backend: &backend',
+        '  image: nodics/kickoff-backend:docker-local',
+        'services:',
+        '  axis:',
+        '    build: { args: { FRONTEND_PROJECT: nodics.exp/nodics.axis } }',
+        '  nexus:',
+        '    build: { args: { FRONTEND_PROJECT: nodics.exp/nodics.nexus } }',
+        'networks:',
+        '  public: { name: nodics-kickoff-docker-local-public }',
+        ''
+    ].join('\n'));
     const dataPath = path.join(projectPath, 'modules', 'nexus.web', 'modules', 'nexusWebData', 'data');
     fs.mkdirSync(dataPath, { recursive: true });
     fs.writeFileSync(path.join(dataPath, 'content.js'), "module.exports = { text: 'nodics.kickoff checksum payload' };\n");
@@ -329,6 +376,13 @@ test('rebrand rewrites generated topology frontend roots', () => {
     assert.match(dockerFile, /ENV=acmeDockerLocal/);
     assert.match(dockerFile, /COPY acme\.project \/workspace\/acme\.project/);
     assert.doesNotMatch(dockerFile, /kickoffDockerLocal|nodics\.kickoff/);
+    const dockerCompose = fs.readFileSync(path.join(projectPath, 'envs', 'acmeDockerLocal', 'docker', 'compose.yaml'), 'utf8');
+    assert.match(dockerCompose, /name: nodics-acme-docker-local/);
+    assert.match(dockerCompose, /image: nodics\/acme-backend:docker-local/);
+    assert.match(dockerCompose, /FRONTEND_PROJECT: nodics\.axis/);
+    assert.match(dockerCompose, /FRONTEND_PROJECT: acme/);
+    assert.match(dockerCompose, /nodics-acme-docker-local-public/);
+    assert.doesNotMatch(dockerCompose, /nodics-kickoff-docker-local|nodics\.exp\/nodics\.(axis|nexus)/);
     assert.match(fs.readFileSync(path.join(dataPath, 'content.js'), 'utf8'), /nodics\.kickoff checksum payload/);
     assert.match(fs.readFileSync(path.join(axisPath, '.env'), 'utf8'), /AXIS_PROJECT_CODE=acme\.project/);
     assert.match(fs.readFileSync(path.join(companyPath, '.env'), 'utf8'), /NEXUS_PLATFORM_BASE_URL=http:\/\/localhost:4300/);
@@ -477,11 +531,52 @@ test('doctor returns prerequisite fix guidance', async () => {
 test('version action exposes supported actions without requiring workspace validation', async () => {
     const result = installer.versionInfo();
     assert.equal(result.operation, 'local-installer-version');
-    assert.equal(result.version, '0.5.0');
+    assert.equal(result.version, '0.6.0');
     assert(result.actions.includes('status'));
     assert(result.actions.includes('repair'));
     assert(result.mutatingActions.includes('clean'));
     assert.match(installer.renderVersion(result), /Mutating actions require --yes/);
+});
+
+test('operational failures include beginner import diagnostics', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-diagnostics-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.project'
+    ]);
+    const artifactPath = path.join(
+        options.application.projectPath,
+        'envs',
+        'acmeLocal',
+        'wcmsStagedServer',
+        'temp',
+        'import',
+        'core',
+        'error',
+        'agoraComponentMediaData_js_0_0.js'
+    );
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+    fs.writeFileSync(artifactPath, 'Media reference was not found\n');
+    const error = new Error('Command failed: npm run acceptance:guided-initialization');
+    error.commandResult = {
+        command: 'npm run acceptance:guided-initialization',
+        cwd: options.application.projectPath,
+        exitCode: 1,
+        stdout: 'Import completed with record-level errors',
+        stderr: 'Media reference was not found in agoraComponentMediaData',
+        status: 'failed'
+    };
+
+    const result = installer.runOperationalStep(options, 'initialize', () => {
+        throw error;
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.diagnosis.code, 'media-reference-missing');
+    assert.deepEqual(result.diagnosis.evidence, [artifactPath]);
+    assert.match(installer.renderOperationalAction('Nodics guided initialization', result),
+        /WCMS component media data/);
 });
 
 test('status summarizes evidence repositories topology and urls', () => {
@@ -620,5 +715,5 @@ test('CLI prints structured JSON', () => {
     const parsed = JSON.parse(output);
     assert.equal(parsed.operation, 'local-setup-plan');
     assert.equal(parsed.installer.packageName, 'nodics.installer');
-    assert.equal(parsed.installer.version, '0.5.0');
+    assert.equal(parsed.installer.version, '0.6.0');
 });
