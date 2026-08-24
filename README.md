@@ -127,8 +127,19 @@ what will happen before the machine is changed.
 | Preflight | `npx github:Nodics/nodics.installer --action=preflight` | Checks Node.js, npm, Git, runtime dependencies, optional Docker, workspace parent, and expected ports. |
 | Doctor | `npx github:Nodics/nodics.installer --action=doctor` | Prints preflight checks with beginner fix guidance. |
 | Execute | `npx github:Nodics/nodics.installer --action=execute --yes` | Runs the selected setup level and writes evidence. |
+| Status | `npx github:Nodics/nodics.installer --action=status` | Shows evidence, repositories, topology readiness, URLs, and log location. |
+| Start | `npx github:Nodics/nodics.installer --action=start --yes` | Starts or verifies the existing local topology. |
+| Stop | `npx github:Nodics/nodics.installer --action=stop --yes` | Stops the local topology through the customer project. |
+| Restart | `npx github:Nodics/nodics.installer --action=restart --yes` | Stops and starts the local topology again. |
+| Logs | `npx github:Nodics/nodics.installer --action=logs` | Lists topology logs and prints recent lines. |
+| Initialize | `npx github:Nodics/nodics.installer --action=initialize --yes` | Starts if needed, then runs guided initialization. |
+| Acceptance | `npx github:Nodics/nodics.installer --action=acceptance --yes` | Starts if needed, then runs local acceptance checks. |
+| Repair | `npx github:Nodics/nodics.installer --action=repair --yes` | Reapplies installer identity and framework links without recloning. |
+| Clean | `npx github:Nodics/nodics.installer --action=clean --yes` | Removes generated runtime files only; refuses while topology is running. |
+| Version | `npx github:Nodics/nodics.installer --action=version` | Prints installer version, engines, and supported actions. |
 
-Execution never runs unless `--yes` is present.
+Mutating actions never run unless `--yes` is present. This includes `execute`,
+`start`, `stop`, `restart`, `initialize`, `acceptance`, `repair`, and `clean`.
 
 ## Beginner Journey
 
@@ -221,6 +232,41 @@ Recommended beginner sequence:
 5. Run `--action=execute --yes --execution-level=preflight` to run installer and topology checks.
 6. Run `--action=execute --yes --execution-level=start` when the machine is ready to start services.
 7. Use `--execution-level=initialize` or `--execution-level=acceptance --acceptance` for the longer data and validation path.
+
+After startup, these daily commands are usually enough:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=status \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=logs \
+  --runtime=platform \
+  --lines=80 \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=restart \
+  --yes \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
 
 Examples:
 
@@ -365,7 +411,7 @@ The installer follows these rules:
 
 ## Current Status
 
-Version `0.4.0` implements the multi-site application identity setup contract:
+Version `0.5.0` implements the multi-site application identity and local operations setup contract:
 
 - guided option parsing and questionnaire support;
 - named backend project, company site, and commerce site setup planning;
@@ -378,6 +424,7 @@ Version `0.4.0` implements the multi-site application identity setup contract:
 - application `.env` framework and identity linking;
 - dependency install orchestration;
 - resumable setup evidence;
+- status, logs, start, stop, restart, initialize, acceptance, repair, clean, and version actions;
 - module-shaped repository compliance tests.
 
 The full runtime stack was not started during repository tests. The test suite

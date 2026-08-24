@@ -18,14 +18,18 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const REBRAND_STAGE_VERSION = VERSION + ':project-runtime-identity-v5';
 const START_STAGE_VERSION = VERSION + ':detached-topology-start-v1';
 const VALID_JOURNEYS = new Set(['reference', 'project']);
 const VALID_MODES = new Set(['node', 'docker']);
 const VALID_APPS = new Set(['axis']);
 const VALID_ACCELERATORS = new Set(['common', 'apparel', 'electronics', 'telco', 'combined']);
-const VALID_ACTIONS = new Set(['plan', 'questionnaire', 'preflight', 'doctor', 'execute']);
+const VALID_ACTIONS = new Set([
+    'plan', 'questionnaire', 'preflight', 'doctor', 'execute', 'status', 'start', 'stop', 'restart', 'logs',
+    'initialize', 'acceptance', 'repair', 'clean', 'version'
+]);
+const MUTATING_ACTIONS = new Set(['execute', 'start', 'stop', 'restart', 'initialize', 'acceptance', 'repair', 'clean']);
 const VALID_EXECUTION_LEVELS = new Set(['download', 'install', 'preflight', 'start', 'initialize', 'acceptance']);
 const VALID_CLONE_MODES = new Set(['https', 'ssh', 'existing']);
 
@@ -220,6 +224,16 @@ const installer = {
             '  --action=preflight        Check local machine prerequisites and ports.',
             '  --action=doctor           Check prerequisites and print fix guidance.',
             '  --action=execute --yes    Run the selected setup level with evidence.',
+            '  --action=status           Show evidence, repository, topology, and URL status.',
+            '  --action=start --yes      Start the selected topology.',
+            '  --action=stop --yes       Stop the selected topology.',
+            '  --action=restart --yes    Stop and start the selected topology.',
+            '  --action=logs             Show topology log files and optional excerpts.',
+            '  --action=initialize --yes Run guided initialization.',
+            '  --action=acceptance --yes Run local acceptance checks.',
+            '  --action=repair --yes     Reapply installer identity and framework links.',
+            '  --action=clean --yes      Remove generated runtime files only.',
+            '  --action=version          Show installer version and supported actions.',
             '',
             'Options:',
             '  --journey=reference|project',
@@ -244,6 +258,8 @@ const installer = {
             '  --npm-registry=https://registry   Use npm registry while installing.',
             '  --offline-cache=/path             Record offline cache location.',
             '  --policy-pack=/path               Record enterprise policy pack location.',
+            '  --runtime=platform                Select runtime for logs.',
+            '  --lines=80                        Number of log lines to show. Default: 80.',
             '  --json                            Print structured JSON.',
             '  --help                            Show this help.',
             '',
@@ -267,8 +283,18 @@ const installer = {
         const requestedApps = this.readCsvOption(args, '--apps', defaultApps);
         const requiredApps = ACCELERATOR_PROFILES[accelerator] ? ACCELERATOR_PROFILES[accelerator].requiredApps : [];
         const apps = Array.from(new Set([...requestedApps, ...requiredApps]));
+        const action = this.readOption(args, '--action', 'plan').toLowerCase();
         const explicitExecutionLevel = this.readOption(args, '--execution-level', null);
         let executionLevel = explicitExecutionLevel || 'preflight';
+        if (!explicitExecutionLevel && action === 'start') {
+            executionLevel = 'start';
+        }
+        if (!explicitExecutionLevel && action === 'initialize') {
+            executionLevel = 'initialize';
+        }
+        if (!explicitExecutionLevel && action === 'acceptance') {
+            executionLevel = 'acceptance';
+        }
         if (!explicitExecutionLevel && this.hasFlag(args, '--start')) {
             executionLevel = 'start';
         }
@@ -290,21 +316,23 @@ const installer = {
             commerceSite: !this.hasFlag(args, '--without-commerce-site') && !this.hasFlag(args, '--without-web'),
             companySite: !this.hasFlag(args, '--without-company-site'),
             accelerator,
-            action: this.readOption(args, '--action', 'plan').toLowerCase(),
+            action,
             executionLevel: executionLevel.toLowerCase(),
             cloneMode: this.readOption(args, '--clone', 'https').toLowerCase(),
             release: this.readOption(args, '--release', 'development'),
             sampleData: this.hasFlag(args, '--sample-data'),
             freshData: this.hasFlag(args, '--fresh-data'),
-            start: this.hasFlag(args, '--start'),
-            initialize: this.hasFlag(args, '--initialize'),
-            acceptance: this.hasFlag(args, '--acceptance'),
+            start: this.hasFlag(args, '--start') || action === 'start',
+            initialize: this.hasFlag(args, '--initialize') || action === 'initialize',
+            acceptance: this.hasFlag(args, '--acceptance') || action === 'acceptance',
             yes: this.hasFlag(args, '--yes'),
             json: this.hasFlag(args, '--json'),
             proxy: this.readOption(args, '--proxy', ''),
             npmRegistry: this.readOption(args, '--npm-registry', ''),
             offlineCache: this.readOption(args, '--offline-cache', ''),
-            policyPack: this.readOption(args, '--policy-pack', '')
+            policyPack: this.readOption(args, '--policy-pack', ''),
+            runtime: this.readOption(args, '--runtime', ''),
+            lines: Number(this.readOption(args, '--lines', '80')) || 80
         };
         options.application = this.createApplicationIdentity(options);
         return options;
@@ -447,7 +475,7 @@ const installer = {
             errors.push('Unknown accelerator `' + options.accelerator + '`. Use common, apparel, electronics, telco, or combined.');
         }
         if (!VALID_ACTIONS.has(options.action)) {
-            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, or execute.');
+            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, or version.');
         }
         if (!VALID_EXECUTION_LEVELS.has(options.executionLevel)) {
             errors.push('Unknown execution level `' + options.executionLevel + '`.');
@@ -455,8 +483,8 @@ const installer = {
         if (!VALID_CLONE_MODES.has(options.cloneMode)) {
             errors.push('Unknown clone mode `' + options.cloneMode + '`. Use https, ssh, or existing.');
         }
-        if (options.action === 'execute' && !options.yes) {
-            errors.push('Execution requires --yes so the installer cannot mutate the machine by accident.');
+        if (MUTATING_ACTIONS.has(options.action) && !options.yes) {
+            errors.push('Action `' + options.action + '` requires --yes so the installer cannot mutate the machine by accident.');
         }
         if (options.journey === 'project') {
             errors.push('The custom project journey is documented but deferred until the reference local setup journey is stable.');
@@ -1448,6 +1476,264 @@ const installer = {
             this.runProjectCommand(options, 'topology:preflight', [], false);
     },
 
+    runGuidedInitialization: function (options) {
+        return this.runProjectCommand(options, 'acceptance:guided-initialization', [], false);
+    },
+
+    runAcceptanceChecks: function (options) {
+        return options.mode === 'docker' ?
+            this.runProjectCommand(options, 'docker-local:acceptance', [], false) :
+            this.runProjectCommand(options, 'acceptance:local:fresh', [], false);
+    },
+
+    readProjectDescriptor: function (options) {
+        const projectJsonPath = path.join(options.application.projectPath, 'nodics.project.json');
+        return fs.existsSync(projectJsonPath) ? this.readJsonFile(projectJsonPath) : null;
+    },
+
+    repositoryStatus: function (repository) {
+        const exists = fs.existsSync(repository.targetPath);
+        const gitCheckout = exists && this.isGitCheckout(repository.targetPath);
+        const result = {
+            name: repository.name,
+            path: repository.targetPath,
+            exists,
+            gitCheckout
+        };
+        if (!gitCheckout) {
+            return result;
+        }
+        const status = this.runCommand('git', ['status', '--short'], { cwd: repository.targetPath, allowFailure: true });
+        const branch = this.runCommand('git', ['branch', '--show-current'], { cwd: repository.targetPath, allowFailure: true });
+        const commit = this.runCommand('git', ['rev-parse', '--short', 'HEAD'], { cwd: repository.targetPath, allowFailure: true });
+        result.branch = branch.stdout.trim() || undefined;
+        result.commit = commit.stdout.trim() || undefined;
+        result.dirty = Boolean(status.stdout.trim());
+        return result;
+    },
+
+    setupStatus: function (plan, options) {
+        const evidence = this.readEvidence(plan.evidencePath);
+        const topology = fs.existsSync(options.application.projectPath) ? this.readTopologyStatus(options) : null;
+        const projectDescriptor = this.readProjectDescriptor(options);
+        return {
+            operation: 'local-setup-status',
+            ok: Boolean(topology && this.topologyIsReady(topology.status)),
+            installer: plan.installer,
+            workspace: options.workspace,
+            application: options.application,
+            evidencePath: plan.evidencePath,
+            evidence: evidence ? {
+                exists: true,
+                action: evidence.action,
+                executionLevel: evidence.executionLevel,
+                release: evidence.release,
+                startedAt: evidence.startedAt,
+                finishedAt: evidence.finishedAt,
+                steps: evidence.steps.map(step => ({
+                    code: step.code,
+                    status: step.status,
+                    stageVersion: step.stageVersion,
+                    timestamp: step.timestamp
+                }))
+            } : { exists: false },
+            repositories: plan.repositories.map(repository => this.repositoryStatus(repository)),
+            topology: topology ? topology.status : null,
+            project: projectDescriptor ? {
+                projectCode: projectDescriptor.projectCode,
+                displayName: projectDescriptor.displayName,
+                environment: projectDescriptor.topology && projectDescriptor.topology.environment,
+                stateDirectory: projectDescriptor.topology && projectDescriptor.topology.stateDirectory
+            } : null,
+            expectedUrls: plan.expectedUrls,
+            logDirectory: this.resolveTopologyStateDirectory(options, projectDescriptor)
+        };
+    },
+
+    renderStatus: function (status) {
+        const lines = [
+            'Nodics Installer status ' + (status.ok ? 'ready' : 'not ready'),
+            '',
+            'Workspace: ' + status.workspace,
+            'Application: ' + status.application.name + ' (' + status.application.projectName + ')',
+            'Evidence: ' + status.evidencePath + (status.evidence.exists ? '' : ' (missing)')
+        ];
+        if (status.project) {
+            lines.push('Environment: ' + status.project.environment);
+            lines.push('Topology state: ' + status.project.stateDirectory);
+        }
+        if (status.topology) {
+            lines.push('Supervisor: ' + status.topology.supervisor);
+            status.topology.runtimes.forEach(runtime => {
+                lines.push('- ' + runtime.code + ': ' + (runtime.ready ? 'ready' : 'not ready') +
+                    ' port=' + runtime.port + ' ownership=' + runtime.ownership);
+            });
+        } else {
+            lines.push('Supervisor: unavailable');
+        }
+        lines.push('', 'Repositories:');
+        status.repositories.forEach(repository => {
+            lines.push('- ' + repository.name + ': ' + (repository.exists ? 'present' : 'missing') +
+                (repository.branch ? ' branch=' + repository.branch : '') +
+                (repository.commit ? ' commit=' + repository.commit : '') +
+                (repository.dirty ? ' dirty' : ''));
+        });
+        lines.push('', 'Expected URLs:');
+        Object.entries(status.expectedUrls).filter(([, value]) => value).forEach(([key, value]) => {
+            lines.push('- ' + key + ': ' + value);
+        });
+        if (status.logDirectory) {
+            lines.push('', 'Logs: ' + status.logDirectory);
+        }
+        return lines.join('\n');
+    },
+
+    stopTopology: function (options, allowFailure) {
+        return this.runProjectCommand(options, 'topology:stop', [], Boolean(allowFailure));
+    },
+
+    restartTopology: async function (options) {
+        const stop = this.stopTopology(options, true);
+        const start = await this.ensureTopologyStarted(options);
+        return {
+            operation: 'local-setup-restart',
+            ok: true,
+            stop,
+            start
+        };
+    },
+
+    repairSetup: function (plan, options) {
+        const changed = this.rebrandGeneratedApplications(plan, options);
+        const configure = this.configureApplicationProject(plan, options);
+        return {
+            operation: 'local-setup-repair',
+            ok: true,
+            changed,
+            configure
+        };
+    },
+
+    resolveTopologyStateDirectory: function (options, projectDescriptor) {
+        const descriptor = projectDescriptor || this.readProjectDescriptor(options);
+        const stateDirectory = descriptor && descriptor.topology && descriptor.topology.stateDirectory;
+        return stateDirectory ? path.join(options.application.projectPath, stateDirectory) : null;
+    },
+
+    collectLogFiles: function (options) {
+        const stateDirectory = this.resolveTopologyStateDirectory(options);
+        if (!stateDirectory || !fs.existsSync(stateDirectory)) {
+            return [];
+        }
+        return fs.readdirSync(stateDirectory)
+            .filter(fileName => fileName.endsWith('.log'))
+            .map(fileName => path.join(stateDirectory, fileName))
+            .sort();
+    },
+
+    readLastLines: function (filePath, lineCount) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split(/\r?\n/);
+        if (lines.length && lines[lines.length - 1] === '') {
+            lines.pop();
+        }
+        return lines.slice(-Math.max(1, lineCount)).join('\n');
+    },
+
+    logsStatus: function (options) {
+        const runtime = String(options.runtime || '').trim();
+        const logs = this.collectLogFiles(options)
+            .filter(filePath => !runtime || path.basename(filePath, '.log') === runtime)
+            .map(filePath => ({
+                runtime: path.basename(filePath, '.log'),
+                path: filePath,
+                sizeBytes: fs.statSync(filePath).size,
+                excerpt: this.readLastLines(filePath, options.lines)
+            }));
+        return {
+            operation: 'local-setup-logs',
+            ok: logs.length > 0,
+            runtime: runtime || undefined,
+            lines: options.lines,
+            logDirectory: this.resolveTopologyStateDirectory(options),
+            logs
+        };
+    },
+
+    renderLogs: function (result) {
+        const lines = [
+            'Nodics Installer logs',
+            'Directory: ' + (result.logDirectory || 'missing')
+        ];
+        if (!result.logs.length) {
+            lines.push('No topology logs found.');
+            return lines.join('\n');
+        }
+        result.logs.forEach(log => {
+            lines.push('', '== ' + log.runtime + ' ==', log.path, log.excerpt || '(empty)');
+        });
+        return lines.join('\n');
+    },
+
+    cleanGeneratedRuntime: function (options) {
+        const topology = this.readTopologyStatus(options);
+        if (this.topologyIsReady(topology.status)) {
+            throw new Error('Refusing to clean generated runtime files while topology is running. Run --action=stop --yes first.');
+        }
+        const projectDescriptor = this.readProjectDescriptor(options);
+        const targets = [];
+        const stateDirectory = this.resolveTopologyStateDirectory(options, projectDescriptor);
+        if (stateDirectory) {
+            targets.push(stateDirectory);
+        }
+        const dockerGenerated = projectDescriptor &&
+            projectDescriptor.containerEnvironments &&
+            projectDescriptor.containerEnvironments.dockerLocal &&
+            projectDescriptor.containerEnvironments.dockerLocal.generatedDirectory;
+        if (dockerGenerated) {
+            targets.push(path.join(options.application.projectPath, dockerGenerated));
+        }
+        const removed = [];
+        Array.from(new Set(targets)).forEach(target => {
+            if (fs.existsSync(target)) {
+                fs.rmSync(target, { recursive: true, force: true });
+                removed.push(target);
+            }
+        });
+        return {
+            operation: 'local-setup-clean',
+            ok: true,
+            removed
+        };
+    },
+
+    versionInfo: function () {
+        const packageJson = this.readJsonFile(path.resolve(__dirname, '..', 'package.json'));
+        return {
+            operation: 'local-installer-version',
+            ok: true,
+            packageName: packageJson.name,
+            version: VERSION,
+            packageVersion: packageJson.version,
+            node: packageJson.engines && packageJson.engines.node,
+            npm: packageJson.engines && packageJson.engines.npm,
+            actions: Array.from(VALID_ACTIONS).sort(),
+            mutatingActions: Array.from(MUTATING_ACTIONS).sort(),
+            bootstrapCommand: 'npx github:Nodics/nodics.installer'
+        };
+    },
+
+    renderVersion: function (info) {
+        return [
+            info.packageName + ' ' + info.version,
+            'Bootstrap: ' + info.bootstrapCommand,
+            'Node: ' + info.node,
+            'npm: ' + info.npm,
+            'Actions: ' + info.actions.join(', '),
+            'Mutating actions require --yes: ' + info.mutatingActions.join(', ')
+        ].join('\n');
+    },
+
     executeSetup: async function (plan, options) {
         const evidence = this.refreshEvidenceContext(
             this.readEvidence(plan.evidencePath) || this.createEvidence(plan, options),
@@ -1512,8 +1798,7 @@ const installer = {
             return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
         }
         if (options.accelerator !== 'common' || options.initialize || options.sampleData || options.freshData) {
-            runStage('initialize', 'Run guided initialization', () =>
-                this.runProjectCommand(options, 'acceptance:guided-initialization', [], false));
+            runStage('initialize', 'Run guided initialization', () => this.runGuidedInitialization(options));
         }
         if (options.executionLevel === 'initialize') {
             evidence.finishedAt = new Date().toISOString();
@@ -1521,9 +1806,7 @@ const installer = {
             return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
         }
         if (options.acceptance) {
-            runStage('acceptance', 'Run acceptance checks', () => options.mode === 'docker' ?
-                this.runProjectCommand(options, 'docker-local:acceptance', [], false) :
-                this.runProjectCommand(options, 'acceptance:local:fresh', [], false));
+            runStage('acceptance', 'Run acceptance checks', () => this.runAcceptanceChecks(options));
         }
         evidence.finishedAt = new Date().toISOString();
         this.writeEvidence(plan.evidencePath, evidence);
@@ -1557,10 +1840,20 @@ const installer = {
             return true;
         }
         let options = this.parseOptions(args);
+        if (options.action === 'version') {
+            const result = this.versionInfo();
+            this.printResult(options, result, version => this.renderVersion(version));
+            return true;
+        }
         if (options.action === 'questionnaire' || this.shouldRunStartupQuestionnaire(args, options, runtime)) {
             options = await this.runQuestionnaire(options);
         }
         const plan = this.createSetupPlan(options);
+        if (options.action === 'status') {
+            const result = this.setupStatus(plan, options);
+            this.printResult(options, result, status => this.renderStatus(status));
+            return true;
+        }
         if (options.action === 'preflight') {
             const result = await this.preflight(plan, options);
             this.printResult(options, result, preflight =>
@@ -1571,6 +1864,52 @@ const installer = {
         if (options.action === 'doctor') {
             const result = await this.preflight(plan, options);
             this.printResult(options, result, doctor => this.renderDoctor(doctor));
+            return true;
+        }
+        if (options.action === 'logs') {
+            const result = this.logsStatus(options);
+            this.printResult(options, result, logs => this.renderLogs(logs));
+            return true;
+        }
+        if (options.action === 'start') {
+            const result = await this.ensureTopologyStarted(options);
+            this.printResult(options, result, start => 'Nodics topology start completed\nStatus: ' + start.status);
+            return true;
+        }
+        if (options.action === 'stop') {
+            const result = this.stopTopology(options, false);
+            this.printResult(options, result, stop => 'Nodics topology stop completed\n' + stop.command);
+            return true;
+        }
+        if (options.action === 'restart') {
+            const result = await this.restartTopology(options);
+            this.printResult(options, result, restart => 'Nodics topology restart completed\n' +
+                'Stop: ' + restart.stop.status + '\nStart: ' + restart.start.status);
+            return true;
+        }
+        if (options.action === 'repair') {
+            const result = this.repairSetup(plan, options);
+            this.printResult(options, result, repair => 'Nodics Installer repair completed\nChanged files: ' + repair.changed.length);
+            return true;
+        }
+        if (options.action === 'initialize') {
+            const start = await this.ensureTopologyStarted(options);
+            const initialize = this.runGuidedInitialization(options);
+            const result = { operation: 'local-setup-initialize', ok: initialize.status === 'passed', start, initialize };
+            this.printResult(options, result, init => 'Nodics guided initialization completed\nStatus: ' + init.initialize.status);
+            return true;
+        }
+        if (options.action === 'acceptance') {
+            const start = await this.ensureTopologyStarted(options);
+            const acceptance = this.runAcceptanceChecks(options);
+            const result = { operation: 'local-setup-acceptance', ok: acceptance.status === 'passed', start, acceptance };
+            this.printResult(options, result, accepted => 'Nodics acceptance completed\nStatus: ' + accepted.acceptance.status);
+            return true;
+        }
+        if (options.action === 'clean') {
+            const result = this.cleanGeneratedRuntime(options);
+            this.printResult(options, result, clean => 'Nodics generated runtime clean completed\nRemoved: ' +
+                (clean.removed.length ? clean.removed.join('\n') : 'nothing'));
             return true;
         }
         if (options.action === 'execute') {

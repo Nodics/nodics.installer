@@ -25,7 +25,7 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
     const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     const nodicsRoot = require('../nodics');
     assert.equal(packageJson.main, 'nodics.js');
-    assert.equal(packageJson.version, '0.4.0');
+    assert.equal(packageJson.version, '0.5.0');
     assert.equal(packageJson.nodics.kind, 'tooling');
     assert.equal(packageJson.nodics.displayName, 'Nodics Installer');
     assert.equal(packageJson.nodics.runtimeModule, false);
@@ -56,7 +56,7 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.dryRun, true);
     assert.equal(plan.writePerformed, false);
     assert.equal(plan.executionSupported, true);
-    assert.equal(plan.installer.version, '0.4.0');
+    assert.equal(plan.installer.version, '0.5.0');
     assert.equal(plan.installer.bootstrapCommand, 'npx github:Nodics/nodics.installer');
     assert.equal(plan.beginnerChoices.application.name, 'Acme');
     assert.equal(plan.beginnerChoices.application.code, 'acme');
@@ -119,6 +119,10 @@ test('accelerators do not add branded frontend applications', () => {
 
 test('beginner execution flags select matching execution levels', () => {
     assert.equal(installer.parseOptions(['--start']).executionLevel, 'start');
+    assert.equal(installer.parseOptions(['--action=start']).executionLevel, 'start');
+    assert.equal(installer.parseOptions(['--action=initialize']).executionLevel, 'initialize');
+    assert.equal(installer.parseOptions(['--action=acceptance']).executionLevel, 'acceptance');
+    assert.equal(installer.parseOptions(['--action=acceptance']).acceptance, true);
     assert.equal(installer.parseOptions(['--initialize']).executionLevel, 'initialize');
     assert.equal(installer.parseOptions(['--acceptance']).executionLevel, 'acceptance');
     assert.equal(installer.parseOptions(['--execution-level=download', '--start']).executionLevel, 'download');
@@ -130,7 +134,11 @@ test('rejects unsafe or deferred execution paths', () => {
     assert.throws(() => installer.createSetupPlan(installer.parseOptions([
         '--workspace=/tmp/nodicsRoot',
         '--action=execute'
-    ])), /Execution requires --yes/);
+    ])), /requires --yes/);
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--action=stop'
+    ])), /requires --yes/);
     assert.throws(() => installer.createSetupPlan(installer.parseOptions([
         '--workspace=' + os.homedir()
     ])), /not the filesystem root or home directory/);
@@ -421,6 +429,40 @@ test('start execution rechecks live topology even when evidence has a prior star
     assert.equal(evidence.steps.filter(step => step.code === 'start').length, 2);
 });
 
+test('start action operates on topology without running setup pipeline', async () => {
+    const options = installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--action=start',
+        '--yes'
+    ]);
+    let started = false;
+    let executed = false;
+    const service = {
+        ...installer,
+        ensureTopologyStarted: async () => {
+            started = true;
+            return { status: 'passed' };
+        },
+        executeSetup: async () => {
+            executed = true;
+            return { ok: true };
+        },
+        printResult: () => {}
+    };
+
+    await service.run([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--action=start',
+        '--yes'
+    ], { input: { isTTY: false }, output: { isTTY: false } });
+
+    assert.equal(options.executionLevel, 'start');
+    assert.equal(started, true);
+    assert.equal(executed, false);
+});
+
 test('doctor returns prerequisite fix guidance', async () => {
     const workspace = path.join(os.tmpdir(), 'nodics-installer-doctor-test');
     const options = installer.parseOptions(['--workspace=' + workspace, '--action=doctor']);
@@ -432,6 +474,145 @@ test('doctor returns prerequisite fix guidance', async () => {
     assert(installer.renderDoctor(result).includes('Nodics Installer doctor'));
 });
 
+test('version action exposes supported actions without requiring workspace validation', async () => {
+    const result = installer.versionInfo();
+    assert.equal(result.operation, 'local-installer-version');
+    assert.equal(result.version, '0.5.0');
+    assert(result.actions.includes('status'));
+    assert(result.actions.includes('repair'));
+    assert(result.mutatingActions.includes('clean'));
+    assert.match(installer.renderVersion(result), /Mutating actions require --yes/);
+});
+
+test('status summarizes evidence repositories topology and urls', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-status-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.project',
+        '--company-site-name=acme',
+        '--commerce-site-name=acme-apparel',
+        '--apps=axis'
+    ]);
+    const plan = installer.createSetupPlan(options);
+    fs.mkdirSync(options.application.projectPath, { recursive: true });
+    installer.writeEvidence(plan.evidencePath, {
+        operation: 'local-setup-evidence',
+        action: 'start',
+        executionLevel: 'start',
+        release: 'development',
+        startedAt: '2026-08-24T00:00:00.000Z',
+        finishedAt: '2026-08-24T00:01:00.000Z',
+        steps: [{ code: 'start', status: 'passed', timestamp: '2026-08-24T00:01:00.000Z' }]
+    });
+    const service = {
+        ...installer,
+        readTopologyStatus: () => ({
+            status: {
+                supervisor: 'RUNNING',
+                runtimes: [{ code: 'platform', port: 4300, ready: true, ownership: 'THIS_SUPERVISOR' }]
+            }
+        }),
+        repositoryStatus: repository => ({ name: repository.name, path: repository.targetPath, exists: false, gitCheckout: false })
+    };
+
+    const status = service.setupStatus(plan, options);
+
+    assert.equal(status.operation, 'local-setup-status');
+    assert.equal(status.ok, true);
+    assert.equal(status.evidence.exists, true);
+    assert.equal(status.expectedUrls.platform, 'http://localhost:4300');
+    assert.match(service.renderStatus(status), /Nodics Installer status ready/);
+});
+
+test('logs action reads topology log excerpts by runtime', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-logs-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.project',
+        '--runtime=platform',
+        '--lines=2'
+    ]);
+    const stateDirectory = path.join(options.application.projectPath, 'envs', 'acmeLocal', 'generated', 'local-topology');
+    fs.mkdirSync(stateDirectory, { recursive: true });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
+        topology: {
+            environment: 'acmeLocal',
+            stateDirectory: 'envs/acmeLocal/generated/local-topology'
+        }
+    });
+    fs.writeFileSync(path.join(stateDirectory, 'platform.log'), 'one\ntwo\nthree\n');
+    fs.writeFileSync(path.join(stateDirectory, 'commerce.log'), 'ignored\n');
+
+    const result = installer.logsStatus(options);
+
+    assert.equal(result.operation, 'local-setup-logs');
+    assert.equal(result.logs.length, 1);
+    assert.equal(result.logs[0].runtime, 'platform');
+    assert.match(result.logs[0].excerpt, /two\nthree/);
+});
+
+test('clean removes generated runtime directories only when topology is stopped', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-clean-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.project',
+        '--action=clean',
+        '--yes'
+    ]);
+    const stateDirectory = path.join(options.application.projectPath, 'envs', 'acmeLocal', 'generated', 'local-topology');
+    const dockerGenerated = path.join(options.application.projectPath, 'envs', 'acmeDockerLocal', 'generated');
+    fs.mkdirSync(stateDirectory, { recursive: true });
+    fs.mkdirSync(dockerGenerated, { recursive: true });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
+        topology: {
+            environment: 'acmeLocal',
+            stateDirectory: 'envs/acmeLocal/generated/local-topology'
+        },
+        containerEnvironments: {
+            dockerLocal: {
+                generatedDirectory: 'envs/acmeDockerLocal/generated'
+            }
+        }
+    });
+    const service = {
+        ...installer,
+        readTopologyStatus: () => ({
+            status: {
+                supervisor: 'NOT_RUNNING',
+                runtimes: [{ code: 'platform', ready: false, ownership: 'NONE' }]
+            }
+        })
+    };
+
+    const result = service.cleanGeneratedRuntime(options);
+
+    assert.equal(result.operation, 'local-setup-clean');
+    assert.equal(fs.existsSync(stateDirectory), false);
+    assert.equal(fs.existsSync(dockerGenerated), false);
+});
+
+test('clean refuses while topology is ready', () => {
+    const options = installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--action=clean',
+        '--yes'
+    ]);
+    const service = {
+        ...installer,
+        readTopologyStatus: () => ({
+            status: {
+                supervisor: 'RUNNING',
+                runtimes: [{ code: 'platform', ready: true, ownership: 'THIS_SUPERVISOR' }]
+            }
+        })
+    };
+    assert.throws(() => service.cleanGeneratedRuntime(options), /Refusing to clean/);
+});
+
 test('CLI prints structured JSON', () => {
     const output = childProcess.execFileSync(process.execPath,
         [path.join(repoRoot, 'bin', 'nodics-installer.js'), '--workspace=/tmp/nodicsRoot', '--json'],
@@ -439,5 +620,5 @@ test('CLI prints structured JSON', () => {
     const parsed = JSON.parse(output);
     assert.equal(parsed.operation, 'local-setup-plan');
     assert.equal(parsed.installer.packageName, 'nodics.installer');
-    assert.equal(parsed.installer.version, '0.4.0');
+    assert.equal(parsed.installer.version, '0.5.0');
 });
