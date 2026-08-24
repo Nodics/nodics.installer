@@ -25,7 +25,7 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
     const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     const nodicsRoot = require('../nodics');
     assert.equal(packageJson.main, 'nodics.js');
-    assert.equal(packageJson.version, '0.2.0');
+    assert.equal(packageJson.version, '0.3.0');
     assert.equal(packageJson.nodics.kind, 'tooling');
     assert.equal(packageJson.nodics.displayName, 'Nodics Installer');
     assert.equal(packageJson.nodics.runtimeModule, false);
@@ -42,8 +42,9 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
 test('creates an executable beginner local setup plan', () => {
     const plan = installer.createSetupPlan(installer.parseOptions([
         '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme Apparel',
         '--mode=node',
-        '--apps=axis,nexus,agora',
+        '--apps=axis',
         '--accelerator=apparel',
         '--release=development'
     ]));
@@ -52,18 +53,28 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.dryRun, true);
     assert.equal(plan.writePerformed, false);
     assert.equal(plan.executionSupported, true);
-    assert.equal(plan.installer.version, '0.2.0');
+    assert.equal(plan.installer.version, '0.3.0');
     assert.equal(plan.installer.bootstrapCommand, 'npx github:Nodics/nodics.installer');
+    assert.equal(plan.beginnerChoices.application.name, 'Acme Apparel');
+    assert.equal(plan.beginnerChoices.application.code, 'acme-apparel');
+    assert.equal(plan.beginnerChoices.application.projectPath, '/tmp/nodicsRoot/acme-apparel');
+    assert.equal(plan.beginnerChoices.application.webPath, '/tmp/nodicsRoot/acme-apparel.web');
     assert.deepEqual(plan.accelerator.domains, ['common', 'apparel']);
     assert(plan.repositories.some(repository => repository.name === 'nodics.ai'));
-    assert(plan.repositories.some(repository => repository.name === 'nodics.kickoff'));
-    assert(plan.repositories.some(repository => repository.name === 'nodics.exp'));
-    assert(plan.repositories.some(repository => repository.name === 'nodics.agora'));
-    assert.equal(plan.repositories.find(repository => repository.name === 'nodics.agora').targetPath,
-        '/tmp/nodicsRoot/nodics.exp/nodics.agora');
+    assert(plan.repositories.some(repository => repository.name === 'acme-apparel'));
+    assert(plan.repositories.some(repository => repository.name === 'nodics.axis'));
+    assert(plan.repositories.some(repository => repository.name === 'acme-apparel.web'));
+    assert.equal(plan.repositories.find(repository => repository.name === 'acme-apparel.web').targetPath,
+        '/tmp/nodicsRoot/acme-apparel.web');
+    assert.equal(Object.prototype.propertyIsEnumerable.call(
+        plan.repositories.find(repository => repository.name === 'acme-apparel'), 'repository'), false);
+    assert(!JSON.stringify(plan).includes('nodics.kickoff'));
+    assert(!JSON.stringify(plan).includes('nodics.agora'));
+    assert(!JSON.stringify(plan).includes('nodics.nexus'));
     assert(plan.commands.some(command => command.stage === 'preflight' && command.command === 'npm run topology:preflight'));
     assert(plan.commands.some(command => command.stage === 'start' && command.command.includes('topology:start:all')));
     assert.equal(plan.expectedUrls.axis, 'http://localhost:3100');
+    assert.equal(plan.expectedUrls.application, 'http://localhost:3300');
     assert.equal(plan.evidencePath, '/tmp/nodicsRoot/.nodics-installer/setup-evidence.json');
 });
 
@@ -71,23 +82,27 @@ test('creates a Docker Local setup plan with Docker preflight', () => {
     const plan = installer.createSetupPlan(installer.parseOptions([
         '--workspace=/tmp/nodicsRoot',
         '--mode=docker',
-        '--apps=axis,nexus',
+        '--application-name=Telco Portal',
+        '--apps=axis',
         '--accelerator=telco'
     ]));
     assert(plan.prerequisites.find(check => check.code === 'docker').required);
     assert(plan.commands.some(command => command.command === 'npm run docker-local:preflight'));
     assert.equal(plan.expectedUrls.axis, 'http://localhost:4100');
-    assert.equal(plan.expectedUrls.nexus, 'http://localhost:4200');
-    assert.equal(plan.expectedUrls.agora, 'http://localhost:4300');
+    assert.equal(plan.expectedUrls.application, 'http://localhost:4300');
+    assert(!Object.prototype.hasOwnProperty.call(plan.expectedUrls, 'nexus'));
+    assert(!Object.prototype.hasOwnProperty.call(plan.expectedUrls, 'agora'));
 });
 
-test('accelerators add their required applications', () => {
+test('accelerators do not add branded frontend applications', () => {
     const options = installer.parseOptions([
         '--workspace=/tmp/nodicsRoot',
+        '--application-name=Combined Store',
         '--apps=axis',
         '--accelerator=combined'
     ]);
-    assert.deepEqual(options.apps, ['axis', 'agora', 'nexus']);
+    assert.deepEqual(options.apps, ['axis']);
+    assert.equal(options.application.code, 'combined-store');
 });
 
 test('beginner execution flags select matching execution levels', () => {
@@ -107,23 +122,30 @@ test('rejects unsafe or deferred execution paths', () => {
     assert.throws(() => installer.createSetupPlan(installer.parseOptions([
         '--workspace=' + os.homedir()
     ])), /not the filesystem root or home directory/);
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--apps=axis,nexus'
+    ])), /Customer-facing apps are named with --application-name/);
 });
 
 test('questionnaire answers merge into normal options', async () => {
     const baseOptions = installer.parseOptions(['--action=questionnaire', '--json']);
     const options = await installer.runQuestionnaire(baseOptions, {
         journey: 'reference',
+        applicationName: 'Customer Telco',
         workspace: '/tmp/nodicsQuestionnaire',
         mode: 'docker',
-        apps: 'axis,nexus',
+        apps: 'axis',
         accelerator: 'combined',
         cloneMode: 'ssh',
         release: 'master'
     });
     assert.equal(options.action, 'questionnaire');
+    assert.equal(options.application.name, 'Customer Telco');
+    assert.equal(options.application.code, 'customer-telco');
     assert.equal(options.workspace, '/tmp/nodicsQuestionnaire');
     assert.equal(options.mode, 'docker');
-    assert.deepEqual(options.apps, ['axis', 'nexus', 'agora']);
+    assert.deepEqual(options.apps, ['axis']);
     assert.equal(options.cloneMode, 'ssh');
     assert.equal(options.release, 'master');
 });
@@ -149,12 +171,13 @@ test('execute writes resumable evidence with injected stages', async () => {
         '--action=execute',
         '--yes',
         '--execution-level=preflight',
+        '--application-name=Evidence App',
         '--apps=axis'
     ]);
     const service = {
         ...installer,
         prepareRepositories: () => [{ repository: 'nodics.ai', action: 'reused' }],
-        configureKickoff: () => ({ status: 'passed', command: 'npm run configure:framework' }),
+        configureApplicationProject: () => ({ status: 'passed', command: 'npm run configure:framework' }),
         installDependencies: () => [{ status: 'passed', command: 'npm ci' }],
         preflight: async () => ({ operation: 'local-setup-preflight', ok: true, checks: [{ code: 'node', status: 'passed' }] })
     };
@@ -173,5 +196,5 @@ test('CLI prints structured JSON', () => {
     const parsed = JSON.parse(output);
     assert.equal(parsed.operation, 'local-setup-plan');
     assert.equal(parsed.installer.packageName, 'nodics.installer');
-    assert.equal(parsed.installer.version, '0.2.0');
+    assert.equal(parsed.installer.version, '0.3.0');
 });

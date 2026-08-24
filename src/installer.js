@@ -18,10 +18,10 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const VALID_JOURNEYS = new Set(['reference', 'project']);
 const VALID_MODES = new Set(['node', 'docker']);
-const VALID_APPS = new Set(['axis', 'nexus', 'agora']);
+const VALID_APPS = new Set(['axis']);
 const VALID_ACCELERATORS = new Set(['common', 'apparel', 'electronics', 'telco', 'combined']);
 const VALID_ACTIONS = new Set(['plan', 'questionnaire', 'preflight', 'execute']);
 const VALID_EXECUTION_LEVELS = new Set(['download', 'install', 'preflight', 'start', 'initialize', 'acceptance']);
@@ -34,17 +34,11 @@ const DEFAULT_REPOSITORIES = Object.freeze({
         https: 'https://github.com/Nodics/nodics.ai.git',
         ssh: 'git@github.com:Nodics/nodics.ai.git'
     },
-    kickoff: {
-        code: 'kickoff',
+    applicationTemplate: {
+        code: 'application-template',
         name: 'nodics.kickoff',
         https: 'https://github.com/Nodics/nodics.kickoff.git',
         ssh: 'git@github.com:Nodics/nodics.kickoff.git'
-    },
-    experience: {
-        code: 'experience',
-        name: 'nodics.exp',
-        https: 'https://github.com/Nodics/nodics.exp.git',
-        ssh: 'git@github.com:Nodics/nodics.exp.git'
     }
 });
 
@@ -56,19 +50,12 @@ const FRONTEND_REPOSITORIES = Object.freeze({
         ssh: 'git@github.com:Nodics/nodics.axis.git',
         type: 'backoffice'
     },
-    nexus: {
-        code: 'nexus',
-        name: 'nodics.nexus',
-        https: 'https://github.com/Nodics/nodics.nexus.git',
-        ssh: 'git@github.com:Nodics/nodics.nexus.git',
-        type: 'corporate'
-    },
-    agora: {
-        code: 'agora',
+    applicationWebTemplate: {
+        code: 'application-web-template',
         name: 'nodics.agora',
         https: 'https://github.com/Nodics/nodics.agora.git',
         ssh: 'git@github.com:Nodics/nodics.agora.git',
-        type: 'storefront'
+        type: 'customer-web'
     }
 });
 
@@ -76,31 +63,31 @@ const ACCELERATOR_PROFILES = Object.freeze({
     common: {
         domains: ['common'],
         requiredApps: [],
-        dataPacks: ['nexusWebData', 'agoraCommonData'],
+        dataPacks: ['commonData'],
         gates: ['topology preflight']
     },
     apparel: {
         domains: ['common', 'apparel'],
-        requiredApps: ['agora'],
-        dataPacks: ['agoraCommonData', 'agoraApparelData'],
-        gates: ['guided initialization', 'agora commerce data']
+        requiredApps: [],
+        dataPacks: ['commonData', 'apparelData'],
+        gates: ['guided initialization', 'application commerce data']
     },
     electronics: {
         domains: ['common', 'electronics'],
-        requiredApps: ['agora'],
-        dataPacks: ['agoraCommonData', 'agoraElectronicsData'],
-        gates: ['guided initialization', 'agora commerce data']
+        requiredApps: [],
+        dataPacks: ['commonData', 'electronicsData'],
+        gates: ['guided initialization', 'application commerce data']
     },
     telco: {
         domains: ['common', 'electronics', 'telco'],
-        requiredApps: ['agora'],
-        dataPacks: ['agoraCommonData', 'agoraTelcoData'],
+        requiredApps: [],
+        dataPacks: ['commonData', 'telcoData'],
         gates: ['guided initialization', 'telco commerce data']
     },
     combined: {
         domains: ['common', 'apparel', 'electronics', 'telco'],
-        requiredApps: ['agora', 'nexus'],
-        dataPacks: ['agoraCommonData', 'agoraApparelData', 'agoraElectronicsData', 'agoraTelcoData', 'nexusWebData'],
+        requiredApps: [],
+        dataPacks: ['commonData', 'apparelData', 'electronicsData', 'telcoData'],
         gates: ['guided initialization', 'multi-domain acceptance']
     }
 });
@@ -123,6 +110,39 @@ const installer = {
             .filter(Boolean);
     },
 
+    toApplicationSlug: function (value) {
+        return String(value || 'my-nodics-app')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'my-nodics-app';
+    },
+
+    toApplicationTitle: function (value) {
+        return String(value || 'My Nodics App')
+            .trim()
+            .replace(/\s+/g, ' ');
+    },
+
+    createApplicationIdentity: function (options) {
+        const title = this.toApplicationTitle(options.applicationName);
+        const slug = this.toApplicationSlug(options.applicationName);
+        return {
+            name: title,
+            code: slug,
+            projectName: slug,
+            webName: slug + '.web',
+            projectPath: path.join(options.workspace, slug),
+            webPath: path.join(options.workspace, slug + '.web'),
+            axisPath: path.join(options.workspace, 'nodics.axis')
+        };
+    },
+
+    applicationDataPacks: function (options, profile) {
+        const identity = options.application || this.createApplicationIdentity(options);
+        return profile.dataPacks.map(dataPack => identity.code + '.' + dataPack);
+    },
+
     usage: function () {
         return [
             'Nodics Installer',
@@ -139,9 +159,11 @@ const installer = {
             '',
             'Options:',
             '  --journey=reference|project',
+            '  --application-name="My Store"   Customer application name. Default: My Nodics App',
             '  --workspace=/absolute/path       Default: ~/Nodics/nodicsRoot',
             '  --mode=node|docker               Default: node',
-            '  --apps=axis,nexus,agora          Default: axis,nexus,agora',
+            '  --apps=axis                      Standard apps to include. Default: axis',
+            '  --without-web                    Do not create a customer web app from the application name.',
             '  --accelerator=common|apparel|electronics|telco|combined',
             '  --execution-level=download|install|preflight|start|initialize|acceptance',
             '  --clone=https|ssh|existing       Default: https',
@@ -164,9 +186,11 @@ const installer = {
 
     parseOptions: function (args) {
         const workspace = this.readOption(args, '--workspace', path.join(os.homedir(), 'Nodics', 'nodicsRoot'));
+        const applicationName = this.readOption(args, '--application-name',
+            this.readOption(args, '--application', 'My Nodics App'));
         const accelerator = this.readOption(args, '--accelerator', 'common').toLowerCase();
         const explicitApps = this.readOption(args, '--apps', null);
-        const defaultApps = explicitApps === null ? ['axis', 'nexus', 'agora'] : [];
+        const defaultApps = explicitApps === null ? ['axis'] : [];
         const requestedApps = this.readCsvOption(args, '--apps', defaultApps);
         const requiredApps = ACCELERATOR_PROFILES[accelerator] ? ACCELERATOR_PROFILES[accelerator].requiredApps : [];
         const apps = Array.from(new Set([...requestedApps, ...requiredApps]));
@@ -181,11 +205,13 @@ const installer = {
         if (!explicitExecutionLevel && this.hasFlag(args, '--acceptance')) {
             executionLevel = 'acceptance';
         }
-        return {
+        const options = {
             journey: this.readOption(args, '--journey', 'reference').toLowerCase(),
             workspace: path.resolve(workspace),
+            applicationName,
             mode: this.readOption(args, '--mode', 'node').toLowerCase(),
             apps,
+            customerWeb: !this.hasFlag(args, '--without-web'),
             accelerator,
             action: this.readOption(args, '--action', 'plan').toLowerCase(),
             executionLevel: executionLevel.toLowerCase(),
@@ -203,14 +229,17 @@ const installer = {
             offlineCache: this.readOption(args, '--offline-cache', ''),
             policyPack: this.readOption(args, '--policy-pack', '')
         };
+        options.application = this.createApplicationIdentity(options);
+        return options;
     },
 
     getQuestionnaireFields: function () {
         return [
             { name: 'journey', question: 'Setup style (reference/project)', defaultValue: 'reference' },
+            { name: 'applicationName', question: 'Application name', defaultValue: 'My Nodics App' },
             { name: 'workspace', question: 'Workspace folder', defaultValue: path.join(os.homedir(), 'Nodics', 'nodicsRoot') },
             { name: 'mode', question: 'Runtime mode (node/docker)', defaultValue: 'node' },
-            { name: 'apps', question: 'Applications (axis,nexus,agora)', defaultValue: 'axis,nexus,agora' },
+            { name: 'apps', question: 'Standard applications (axis)', defaultValue: 'axis' },
             { name: 'accelerator', question: 'Accelerator (common/apparel/electronics/telco/combined)', defaultValue: 'common' },
             { name: 'cloneMode', question: 'Repository access (https/ssh/existing)', defaultValue: 'https' },
             { name: 'release', question: 'Branch or tag', defaultValue: 'development' }
@@ -223,6 +252,9 @@ const installer = {
         }
         if (name === 'cloneMode') {
             return '--clone=' + value;
+        }
+        if (name === 'applicationName') {
+            return '--application-name=' + value;
         }
         return '--' + name + '=' + value;
     },
@@ -257,6 +289,8 @@ const installer = {
         return {
             ...baseOptions,
             journey: answers.journey,
+            applicationName: answers.applicationName,
+            application: answers.application,
             workspace: answers.workspace,
             mode: answers.mode,
             apps: answers.apps,
@@ -276,9 +310,12 @@ const installer = {
         }
         options.apps.forEach(app => {
             if (!VALID_APPS.has(app)) {
-                errors.push('Unknown frontend app `' + app + '`. Use axis, nexus, or agora.');
+                errors.push('Unknown standard app `' + app + '`. Use axis. Customer-facing apps are named with --application-name.');
             }
         });
+        if (!options.application || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(options.application.code)) {
+            errors.push('Application name must contain at least one letter or number.');
+        }
         if (!VALID_ACCELERATORS.has(options.accelerator)) {
             errors.push('Unknown accelerator `' + options.accelerator + '`. Use common, apparel, electronics, telco, or combined.');
         }
@@ -308,19 +345,49 @@ const installer = {
     },
 
     selectedRepositories: function (options) {
-        const repositories = [DEFAULT_REPOSITORIES.framework, DEFAULT_REPOSITORIES.kickoff];
-        if (options.apps.length > 0) {
-            repositories.push(DEFAULT_REPOSITORIES.experience);
-            options.apps.forEach(app => repositories.push(FRONTEND_REPOSITORIES[app]));
+        const repositories = [
+            {
+                ...DEFAULT_REPOSITORIES.framework,
+                targetName: DEFAULT_REPOSITORIES.framework.name
+            },
+            {
+                ...DEFAULT_REPOSITORIES.applicationTemplate,
+                code: 'application',
+                targetName: options.application.projectName,
+                sourceTemplate: DEFAULT_REPOSITORIES.applicationTemplate.name
+            }
+        ];
+        if (options.apps.includes('axis')) {
+            repositories.push({
+                ...FRONTEND_REPOSITORIES.axis,
+                targetName: FRONTEND_REPOSITORIES.axis.name
+            });
         }
-        return repositories.map(repository => ({
-            ...repository,
-            repository: this.resolveRepositoryUrl(repository, options),
-            release: options.release,
-            targetPath: repository.type ?
-                path.join(options.workspace, 'nodics.exp', repository.name) :
-                path.join(options.workspace, repository.name)
-        }));
+        if (options.customerWeb) {
+            repositories.push({
+                ...FRONTEND_REPOSITORIES.applicationWebTemplate,
+                code: 'application-web',
+                targetName: options.application.webName,
+                sourceTemplate: FRONTEND_REPOSITORIES.applicationWebTemplate.name
+            });
+        }
+        return repositories.map(repository => {
+            const target = {
+                code: repository.code,
+                name: repository.targetName || repository.name,
+                type: repository.type,
+                release: options.release,
+                targetPath: repository.code === 'application' ? options.application.projectPath :
+                    repository.code === 'application-web' ? options.application.webPath :
+                        repository.code === 'axis' ? options.application.axisPath :
+                            path.join(options.workspace, repository.name)
+            };
+            Object.defineProperty(target, 'repository', {
+                value: this.resolveRepositoryUrl(repository, options),
+                enumerable: false
+            });
+            return target;
+        });
     },
 
     normalizeCommands: function (commands) {
@@ -336,44 +403,40 @@ const installer = {
     },
 
     nodeCommands: function (options) {
-        const kickoff = path.join(options.workspace, 'nodics.kickoff');
-        const exp = path.join(options.workspace, 'nodics.exp');
-        const apps = options.apps.join(',');
+        const project = options.application.projectPath;
         const commands = [
-            { stage: 'configure', cwd: kickoff, command: 'copy .env.example to .env when .env is absent' },
-            { stage: 'configure', cwd: kickoff, command: 'set NODICS_FRAMEWORK_ROOT=../nodics.ai in .env' },
-            { stage: 'configure', cwd: kickoff, command: 'npm run configure:framework' },
+            { stage: 'configure', cwd: project, command: 'copy .env.example to .env when .env is absent' },
+            { stage: 'configure', cwd: project, command: 'set NODICS_FRAMEWORK_ROOT=../nodics.ai in .env' },
+            { stage: 'configure', cwd: project, command: 'set NODICS_APPLICATION_NAME=' + options.application.name + ' in .env' },
+            { stage: 'configure', cwd: project, command: 'npm run configure:framework' },
             { stage: 'install', cwd: path.join(options.workspace, 'nodics.ai'), command: 'npm ci or npm install' },
-            { stage: 'install', cwd: kickoff, command: 'npm ci or npm install' },
-            { stage: 'install', cwd: exp, command: 'npm run apps:fetch -- --apps=' + apps, when: options.apps.length > 0 },
-            ...options.apps.map(app => ({
-                stage: 'install',
-                cwd: path.join(exp, FRONTEND_REPOSITORIES[app].name),
-                command: 'npm ci or npm install',
-                when: 'frontend app `' + app + '` is selected'
-            })),
-            { stage: 'install', cwd: exp, command: 'npm run apps:verify -- --apps=' + apps, when: options.apps.length > 0 },
-            { stage: 'preflight', cwd: kickoff, command: 'npm run topology:preflight' },
-            { stage: 'start', cwd: kickoff, command: 'npm run topology:start:all', when: options.apps.length > 0 },
-            { stage: 'start', cwd: kickoff, command: 'npm run topology:start', when: options.apps.length === 0 },
-            { stage: 'initialize', cwd: kickoff, command: 'npm run acceptance:guided-initialization', when: options.accelerator !== 'common' },
-            { stage: 'acceptance', cwd: kickoff, command: 'npm run acceptance:local:fresh', when: options.acceptance },
-            { stage: 'acceptance', cwd: kickoff, command: 'npm run test:multi-domain', when: options.accelerator === 'combined' }
+            { stage: 'install', cwd: project, command: 'npm ci or npm install' },
+            { stage: 'install', cwd: options.application.axisPath, command: 'npm ci or npm install', when: options.apps.includes('axis') },
+            { stage: 'install', cwd: options.application.webPath, command: 'npm ci or npm install', when: options.customerWeb },
+            { stage: 'preflight', cwd: project, command: 'npm run topology:preflight' },
+            { stage: 'start', cwd: project, command: 'npm run topology:start:all', when: options.apps.length > 0 || options.customerWeb },
+            { stage: 'start', cwd: project, command: 'npm run topology:start', when: options.apps.length === 0 && !options.customerWeb },
+            { stage: 'initialize', cwd: project, command: 'npm run acceptance:guided-initialization', when: options.accelerator !== 'common' },
+            { stage: 'acceptance', cwd: project, command: 'npm run acceptance:local:fresh', when: options.acceptance },
+            { stage: 'acceptance', cwd: project, command: 'npm run test:multi-domain', when: options.accelerator === 'combined' }
         ];
         return this.normalizeCommands(commands);
     },
 
     dockerCommands: function (options) {
-        const kickoff = path.join(options.workspace, 'nodics.kickoff');
+        const project = options.application.projectPath;
         const commands = [
-            { stage: 'configure', cwd: kickoff, command: 'copy .env.example to .env when .env is absent' },
-            { stage: 'configure', cwd: kickoff, command: 'set NODICS_FRAMEWORK_ROOT=../nodics.ai in .env' },
-            { stage: 'configure', cwd: kickoff, command: 'npm run configure:framework' },
-            { stage: 'install', cwd: kickoff, command: 'npm ci or npm install' },
-            { stage: 'preflight', cwd: kickoff, command: 'npm run docker-local:preflight' },
-            { stage: 'start', cwd: kickoff, command: 'npm run docker-local:build' },
-            { stage: 'start', cwd: kickoff, command: 'npm run docker-local:start' },
-            { stage: 'acceptance', cwd: kickoff, command: 'npm run docker-local:acceptance', when: options.acceptance }
+            { stage: 'configure', cwd: project, command: 'copy .env.example to .env when .env is absent' },
+            { stage: 'configure', cwd: project, command: 'set NODICS_FRAMEWORK_ROOT=../nodics.ai in .env' },
+            { stage: 'configure', cwd: project, command: 'set NODICS_APPLICATION_NAME=' + options.application.name + ' in .env' },
+            { stage: 'configure', cwd: project, command: 'npm run configure:framework' },
+            { stage: 'install', cwd: project, command: 'npm ci or npm install' },
+            { stage: 'install', cwd: options.application.axisPath, command: 'npm ci or npm install', when: options.apps.includes('axis') },
+            { stage: 'install', cwd: options.application.webPath, command: 'npm ci or npm install', when: options.customerWeb },
+            { stage: 'preflight', cwd: project, command: 'npm run docker-local:preflight' },
+            { stage: 'start', cwd: project, command: 'npm run docker-local:build' },
+            { stage: 'start', cwd: project, command: 'npm run docker-local:start' },
+            { stage: 'acceptance', cwd: project, command: 'npm run docker-local:acceptance', when: options.acceptance }
         ];
         return this.normalizeCommands(commands);
     },
@@ -382,8 +445,7 @@ const installer = {
         if (options.mode === 'docker') {
             return {
                 axis: options.apps.includes('axis') ? 'http://localhost:4100' : undefined,
-                nexus: options.apps.includes('nexus') ? 'http://localhost:4200' : undefined,
-                agora: options.apps.includes('agora') ? 'http://localhost:4300' : undefined,
+                application: options.customerWeb ? 'http://localhost:4300' : undefined,
                 platform: 'http://localhost:5300',
                 wcmsStaged: 'http://localhost:5312',
                 wcmsOnline: 'http://localhost:5314',
@@ -394,8 +456,7 @@ const installer = {
         }
         return {
             axis: options.apps.includes('axis') ? 'http://localhost:3100' : undefined,
-            nexus: options.apps.includes('nexus') ? 'http://localhost:3200' : undefined,
-            agora: options.apps.includes('agora') ? 'http://localhost:3300' : undefined,
+            application: options.customerWeb ? 'http://localhost:3300' : undefined,
             platform: 'http://localhost:4300',
             wcmsStaged: 'http://localhost:4312',
             wcmsOnline: 'http://localhost:4314',
@@ -426,10 +487,12 @@ const installer = {
                 bootstrapCommand: 'npx github:Nodics/nodics.installer'
             },
             beginnerChoices: {
-                journey: 'Run Nodics locally with the reference Kickoff project',
+                journey: 'Run Nodics locally with a named customer application',
                 workspace: options.workspace,
+                application: options.application,
                 localMode: options.mode === 'docker' ? 'Docker Local production-simulation' : 'Direct Node.js local processes',
                 apps: options.apps,
+                customerWeb: options.customerWeb,
                 accelerator: options.accelerator,
                 release: options.release,
                 cloneMode: options.cloneMode
@@ -445,7 +508,7 @@ const installer = {
             accelerator: {
                 code: options.accelerator,
                 domains: profile.domains,
-                dataPacks: profile.dataPacks,
+                dataPacks: this.applicationDataPacks(options, profile),
                 gates: profile.gates
             },
             prerequisites: [
@@ -459,7 +522,7 @@ const installer = {
                 'Inspect machine prerequisites and busy ports.',
                 'Resolve and protect the selected workspace.',
                 'Download or reuse required Nodics repositories.',
-                'Configure Kickoff framework links.',
+                'Configure application project framework links.',
                 'Install dependencies in framework, project, and selected frontend apps.',
                 'Run local preflight before starting services.',
                 'Start the selected backend and frontend topology when requested by execution level.',
@@ -485,8 +548,10 @@ const installer = {
             '',
             'Bootstrap command: ' + plan.installer.bootstrapCommand,
             'Workspace: ' + plan.beginnerChoices.workspace,
+            'Application: ' + plan.beginnerChoices.application.name + ' (' + plan.beginnerChoices.application.code + ')',
             'Mode: ' + plan.beginnerChoices.localMode,
-            'Apps: ' + plan.beginnerChoices.apps.join(', '),
+            'Standard apps: ' + plan.beginnerChoices.apps.join(', '),
+            'Customer web app: ' + (plan.beginnerChoices.customerWeb ? plan.beginnerChoices.application.webName : 'disabled'),
             'Starter experience: ' + plan.beginnerChoices.accelerator,
             'Branch/tag: ' + plan.beginnerChoices.release,
             'Repository access: ' + plan.beginnerChoices.cloneMode,
@@ -700,10 +765,10 @@ const installer = {
         return prepared;
     },
 
-    configureKickoff: function (plan, options) {
-        const kickoff = path.join(options.workspace, 'nodics.kickoff');
-        const envPath = path.join(kickoff, '.env');
-        const examplePath = path.join(kickoff, '.env.example');
+    configureApplicationProject: function (plan, options) {
+        const projectPath = options.application.projectPath;
+        const envPath = path.join(projectPath, '.env');
+        const examplePath = path.join(projectPath, '.env.example');
         if (!fs.existsSync(envPath)) {
             if (fs.existsSync(examplePath)) {
                 fs.copyFileSync(examplePath, envPath);
@@ -711,12 +776,22 @@ const installer = {
                 fs.writeFileSync(envPath, 'NODICS_FRAMEWORK_ROOT=../nodics.ai\n');
             }
         }
-        const content = fs.readFileSync(envPath, 'utf8');
-        const nextContent = content.match(/^NODICS_FRAMEWORK_ROOT=/m) ?
-            content.replace(/^NODICS_FRAMEWORK_ROOT=.*/m, 'NODICS_FRAMEWORK_ROOT=../nodics.ai') :
-            content.replace(/\s*$/, '\nNODICS_FRAMEWORK_ROOT=../nodics.ai\n');
+        const envEntries = {
+            NODICS_FRAMEWORK_ROOT: '../nodics.ai',
+            NODICS_APPLICATION_NAME: options.application.name,
+            NODICS_APPLICATION_CODE: options.application.code,
+            NODICS_AXIS_ROOT: '../nodics.axis',
+            NODICS_WEB_ROOT: options.customerWeb ? '../' + options.application.webName : ''
+        };
+        let nextContent = fs.readFileSync(envPath, 'utf8');
+        Object.entries(envEntries).forEach(([key, value]) => {
+            const line = key + '=' + value;
+            nextContent = nextContent.match(new RegExp('^' + key + '=', 'm')) ?
+                nextContent.replace(new RegExp('^' + key + '=.*', 'm'), line) :
+                nextContent.replace(/\s*$/, '\n' + line + '\n');
+        });
         fs.writeFileSync(envPath, nextContent);
-        return this.runKickoffCommand(options, 'configure:framework', [], false);
+        return this.runProjectCommand(options, 'configure:framework', [], false);
     },
 
     packageInstallCommand: function (packagePath, options) {
@@ -730,18 +805,20 @@ const installer = {
     installDependencies: function (plan, options) {
         const roots = [
             path.join(options.workspace, 'nodics.ai'),
-            path.join(options.workspace, 'nodics.kickoff')
+            options.application.projectPath
         ];
-        if (options.apps.length > 0) {
-            roots.push(path.join(options.workspace, 'nodics.exp'));
-            options.apps.forEach(app => roots.push(path.join(options.workspace, 'nodics.exp', FRONTEND_REPOSITORIES[app].name)));
+        if (options.apps.includes('axis')) {
+            roots.push(options.application.axisPath);
+        }
+        if (options.customerWeb) {
+            roots.push(options.application.webPath);
         }
         return roots.map(root => this.packageInstallCommand(root, options));
     },
 
-    runKickoffCommand: function (options, script, commandArgs, allowFailure) {
+    runProjectCommand: function (options, script, commandArgs, allowFailure) {
         return this.runCommand('npm', ['run', script, ...(commandArgs || [])], {
-            cwd: path.join(options.workspace, 'nodics.kickoff'),
+            cwd: options.application.projectPath,
             allowFailure: Boolean(allowFailure)
         });
     },
@@ -761,7 +838,7 @@ const installer = {
             this.writeEvidence(plan.evidencePath, evidence);
             return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
         }
-        runStage('configure', 'Configure Kickoff framework link', () => this.configureKickoff(plan, options));
+        runStage('configure', 'Configure application framework link', () => this.configureApplicationProject(plan, options));
         runStage('install', 'Install dependencies', () => this.installDependencies(plan, options));
         if (options.executionLevel === 'install') {
             evidence.finishedAt = new Date().toISOString();
@@ -786,8 +863,8 @@ const installer = {
             return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
         }
         runStage('start', 'Start topology', () => options.mode === 'docker' ?
-            this.runKickoffCommand(options, 'docker-local:start', [], false) :
-            this.runKickoffCommand(options, options.apps.length > 0 ? 'topology:start:all' : 'topology:start', [], false));
+            this.runProjectCommand(options, 'docker-local:start', [], false) :
+            this.runProjectCommand(options, options.apps.length > 0 || options.customerWeb ? 'topology:start:all' : 'topology:start', [], false));
         if (options.executionLevel === 'start') {
             evidence.finishedAt = new Date().toISOString();
             this.writeEvidence(plan.evidencePath, evidence);
@@ -795,7 +872,7 @@ const installer = {
         }
         if (options.accelerator !== 'common' || options.initialize || options.sampleData || options.freshData) {
             runStage('initialize', 'Run guided initialization', () =>
-                this.runKickoffCommand(options, 'acceptance:guided-initialization', [], false));
+                this.runProjectCommand(options, 'acceptance:guided-initialization', [], false));
         }
         if (options.executionLevel === 'initialize') {
             evidence.finishedAt = new Date().toISOString();
@@ -804,8 +881,8 @@ const installer = {
         }
         if (options.acceptance) {
             runStage('acceptance', 'Run acceptance checks', () => options.mode === 'docker' ?
-                this.runKickoffCommand(options, 'docker-local:acceptance', [], false) :
-                this.runKickoffCommand(options, 'acceptance:local:fresh', [], false));
+                this.runProjectCommand(options, 'docker-local:acceptance', [], false) :
+                this.runProjectCommand(options, 'acceptance:local:fresh', [], false));
         }
         evidence.finishedAt = new Date().toISOString();
         this.writeEvidence(plan.evidencePath, evidence);

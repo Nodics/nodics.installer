@@ -38,7 +38,7 @@ local Nodics runtime needs the tools below.
 
 | Software | Why it is needed | Beginner check |
 | --- | --- | --- |
-| Node.js | Runs the installer, backend tooling, Kickoff scripts, and frontend tooling. | `node --version` |
+| Node.js | Runs the installer, backend tooling, application project scripts, and frontend tooling. | `node --version` |
 | npm | Installs package dependencies and runs repository scripts. | `npm --version` |
 | Git | Downloads or updates Nodics repositories. | `git --version` |
 | MongoDB | Stores local runtime data for framework services. | `mongod --version` or `mongosh --version` |
@@ -70,15 +70,15 @@ npx github:Nodics/nodics.installer \
 
 Installer preflight currently checks Node.js, npm, Git, optional Docker, the
 workspace parent, and expected local ports. Runtime-service checks for MongoDB,
-Redis, Elasticsearch, and profile-specific dependencies remain owned by Kickoff
-topology preflight after repositories are available.
+Redis, Elasticsearch, and profile-specific dependencies remain owned by the
+application project's topology preflight after repositories are available.
 
 ## Why This Exists
 
 `npm run setup:local` is useful only after a developer already has a Nodics
 project downloaded locally. A brand-new machine does not have `nodics.ai`,
-`nodics.kickoff`, or `nodics.exp` yet, so there is no local package script to
-run.
+`nodics.axis`, or the customer's named application project yet, so there is no
+local package script to run.
 
 `nodics.installer` runs one step earlier. Its job is to:
 
@@ -86,7 +86,7 @@ run.
 2. create a safe setup plan;
 3. check local prerequisites;
 4. download or reuse required repositories;
-5. configure the Kickoff reference project;
+5. configure the named application project;
 6. install dependencies;
 7. start the selected local topology when explicitly requested;
 8. guide initialization and acceptance;
@@ -112,20 +112,24 @@ The currently implemented journey is:
 
 ```bash
 npx github:Nodics/nodics.installer \
+  --application-name="Acme Apparel" \
   --workspace=/Users/me/Projects/nodicsRoot \
   --mode=node \
-  --apps=axis,nexus,agora \
+  --apps=axis \
   --accelerator=apparel
 ```
 
-This plans a reference local setup using:
+This plans a local setup using:
 
 - `nodics.ai` for the framework;
-- `nodics.kickoff` for the reference customer project;
-- `nodics.exp` for the frontend workspace;
-- `nodics.axis` for BackOffice;
-- `nodics.nexus` for the corporate site;
-- `nodics.agora` for the storefront.
+- `acme-apparel` for the customer application project;
+- `nodics.axis` for BackOffice, unchanged;
+- `acme-apparel.web` for the customer-facing web app.
+
+Starter templates may still be used internally, but the user's local workspace,
+environment identity, evidence, and beginner plan use the application name. The
+user should not need to choose or work inside folders named Kickoff, Agora, or
+Nexus.
 
 The custom project journey is intentionally still blocked. The installer reports
 that path as deferred until the reference local setup is stable enough to become
@@ -136,12 +140,13 @@ the reusable base for project creation.
 The questionnaire uses plain setup language:
 
 1. Setup style: reference project or custom project.
-2. Workspace folder: where Nodics should live.
-3. Runtime mode: direct Node.js local processes or Docker Local.
-4. Applications: Axis, Nexus, Agora, or a subset.
-5. Accelerator: common, apparel, electronics, telco, or combined.
-6. Repository access: HTTPS, SSH, or existing local repositories.
-7. Branch or tag: normally `development` for active development.
+2. Application name: the customer application name used for folders, identity, and evidence.
+3. Workspace folder: where Nodics should live.
+4. Runtime mode: direct Node.js local processes or Docker Local.
+5. Standard applications: Axis or no standard app.
+6. Accelerator: common, apparel, electronics, telco, or combined.
+7. Repository access: HTTPS, SSH, or existing local repositories.
+8. Branch or tag: normally `development` for active development.
 
 Example:
 
@@ -157,7 +162,7 @@ with.
 | Level | What happens |
 | --- | --- |
 | `download` | Create the workspace and clone or reuse repositories. |
-| `install` | Download/reuse repositories, configure Kickoff, and install dependencies. |
+| `install` | Download/reuse repositories, configure the application project, and install dependencies. |
 | `preflight` | Run download, configure, install, then machine and topology preflight. This is the default execution level. |
 | `start` | Run everything through preflight, then start the selected topology. |
 | `initialize` | Start services and run guided initialization when selected. |
@@ -168,7 +173,7 @@ Recommended beginner sequence:
 1. Run the default plan and read it.
 2. Run `--action=preflight` and resolve missing software or busy ports.
 3. Run `--action=execute --yes --execution-level=download` to download the source.
-4. Run `--action=execute --yes --execution-level=install` to configure Kickoff and install dependencies.
+4. Run `--action=execute --yes --execution-level=install` to configure the application project and install dependencies.
 5. Run `--action=execute --yes --execution-level=preflight` to run installer and topology checks.
 6. Run `--action=execute --yes --execution-level=start` when the machine is ready to start services.
 7. Use `--execution-level=initialize` or `--execution-level=acceptance --acceptance` for the longer data and validation path.
@@ -180,6 +185,7 @@ npx github:Nodics/nodics.installer \
   --action=execute \
   --yes \
   --execution-level=download \
+  --application-name="Acme Apparel" \
   --workspace=/Users/me/Projects/nodicsRoot
 ```
 
@@ -188,8 +194,9 @@ npx github:Nodics/nodics.installer \
   --action=execute \
   --yes \
   --execution-level=start \
+  --application-name="Acme Apparel" \
   --accelerator=combined \
-  --apps=axis,nexus,agora
+  --apps=axis
 ```
 
 ## Repository Download Modes
@@ -218,16 +225,17 @@ instead of resetting or overwriting local work.
 
 ## Accelerator Profiles
 
-Accelerators choose the starter business experience. Some accelerators require
-an application even if the user did not type it explicitly.
+Accelerators choose the starter business experience for the named application.
+They no longer add branded frontend applications such as Agora or Nexus to the
+user's workspace.
 
 | Accelerator | Domains | Required apps | Data packs |
 | --- | --- | --- | --- |
-| `common` | common | none | `nexusWebData`, `agoraCommonData` |
-| `apparel` | common, apparel | Agora | `agoraCommonData`, `agoraApparelData` |
-| `electronics` | common, electronics | Agora | `agoraCommonData`, `agoraElectronicsData` |
-| `telco` | common, electronics, telco | Agora | `agoraCommonData`, `agoraTelcoData` |
-| `combined` | common, apparel, electronics, telco | Agora, Nexus | all listed starter packs |
+| `common` | common | none | `<application>.commonData` |
+| `apparel` | common, apparel | none | `<application>.commonData`, `<application>.apparelData` |
+| `electronics` | common, electronics | none | `<application>.commonData`, `<application>.electronicsData` |
+| `telco` | common, electronics, telco | none | `<application>.commonData`, `<application>.telcoData` |
+| `combined` | common, apparel, electronics, telco | none | all listed application data packs |
 
 ## Node Local And Docker Local
 
@@ -240,8 +248,7 @@ Direct Node local mode is the fastest developer loop:
 Expected URLs include:
 
 - Axis: `http://localhost:3100`
-- Nexus: `http://localhost:3200`
-- Agora: `http://localhost:3300`
+- Application web app: `http://localhost:3300`
 - Platform API: `http://localhost:4300`
 - WCMS Staged API: `http://localhost:4312`
 - WCMS Online API: `http://localhost:4314`
@@ -283,7 +290,7 @@ Execution writes a resumable evidence file:
 The evidence contains:
 
 - installer version;
-- selected journey, mode, apps, accelerator, release, and workspace;
+- selected journey, application name, mode, standard apps, accelerator, release, and workspace;
 - repositories and target paths;
 - setup stages completed;
 - command results;
@@ -306,15 +313,15 @@ The installer follows these rules:
 
 ## Current Status
 
-Version `0.2.0` implements the WP-I1 to WP-I7 foundation:
+Version `0.3.0` implements the application-name-first setup contract:
 
 - guided option parsing and questionnaire support;
-- reference journey setup planning;
+- named application journey setup planning;
 - Node Local and Docker Local command plans;
 - accelerator mapping;
 - prerequisite and port preflight;
 - safe clone/reuse execution;
-- Kickoff `.env` framework linking;
+- application `.env` framework and identity linking;
 - dependency install orchestration;
 - resumable setup evidence;
 - module-shaped repository compliance tests.
@@ -329,6 +336,6 @@ be validated without cloning or starting every Nodics service.
 exist locally:
 
 - `nodics.ai` owns framework tooling and contracts;
-- `nodics.kickoff` owns reference local runtime composition;
-- `nodics.exp` owns frontend app catalogue and workspace tooling;
-- Axis, Nexus, and Agora own their own application source and verification.
+- the named application project owns customer runtime composition;
+- `nodics.axis` owns the standard BackOffice application;
+- the named application web project owns the customer-facing web experience.
