@@ -31,6 +31,48 @@ npm start
 npm test
 ```
 
+## Prerequisite Software
+
+The installer can print a plan with only Node.js and npm available, but a proper
+local Nodics runtime needs the tools below.
+
+| Software | Why it is needed | Beginner check |
+| --- | --- | --- |
+| Node.js | Runs the installer, backend tooling, Kickoff scripts, and frontend tooling. | `node --version` |
+| npm | Installs package dependencies and runs repository scripts. | `npm --version` |
+| Git | Downloads or updates Nodics repositories. | `git --version` |
+| MongoDB | Stores local runtime data for framework services. | `mongod --version` or `mongosh --version` |
+| Redis | Used by cache/session features when enabled in the local profile. | `redis-server --version` |
+| Elasticsearch | Used by search-backed capabilities when enabled. | `curl http://localhost:9200` after starting it |
+| Docker Desktop | Needed only when `--mode=docker` is selected. | `docker --version` |
+
+The current package engine range is Node.js `>=22 <27` and npm `>=10 <12`.
+
+On macOS with Homebrew, a beginner can usually install the basic toolchain with:
+
+```bash
+brew install node git mongodb-community redis
+```
+
+Elasticsearch installation can vary by organization and license policy. If your
+company provides a local Docker image, package mirror, or managed developer
+script, use that approved path. For a first direct local run, start with the
+services your selected Nodics profile actually enables; disabled integrations may
+log that a provider is not enabled, which is expected in local development.
+
+Before running execution, use preflight:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=preflight \
+  --workspace=/Users/me/Projects/nodicsRoot
+```
+
+Installer preflight currently checks Node.js, npm, Git, optional Docker, the
+workspace parent, and expected local ports. Runtime-service checks for MongoDB,
+Redis, Elasticsearch, and profile-specific dependencies remain owned by Kickoff
+topology preflight after repositories are available.
+
 ## Why This Exists
 
 `npm run setup:local` is useful only after a developer already has a Nodics
@@ -120,6 +162,16 @@ with.
 | `start` | Run everything through preflight, then start the selected topology. |
 | `initialize` | Start services and run guided initialization when selected. |
 | `acceptance` | Run the longest local validation path when `--acceptance` is also selected. |
+
+Recommended beginner sequence:
+
+1. Run the default plan and read it.
+2. Run `--action=preflight` and resolve missing software or busy ports.
+3. Run `--action=execute --yes --execution-level=download` to download the source.
+4. Run `--action=execute --yes --execution-level=install` to configure Kickoff and install dependencies.
+5. Run `--action=execute --yes --execution-level=preflight` to run installer and topology checks.
+6. Run `--action=execute --yes --execution-level=start` when the machine is ready to start services.
+7. Use `--execution-level=initialize` or `--execution-level=acceptance --acceptance` for the longer data and validation path.
 
 Examples:
 
