@@ -128,7 +128,9 @@ module.exports = {
         }
         return repositories.map(repository => ({
             ...repository,
-            targetPath: path.join(options.workspace, repository.name)
+            targetPath: repository.type ?
+                path.join(options.workspace, 'nodics.exp', repository.name) :
+                path.join(options.workspace, repository.name)
         }));
     },
 
@@ -137,25 +139,31 @@ module.exports = {
         const kickoff = path.join(options.workspace, 'nodics.kickoff');
         const exp = path.join(options.workspace, 'nodics.exp');
         const apps = options.apps.join(',');
-        return [
+        const commands = [
             { cwd: kickoff, command: 'cp .env.example .env', when: '.env is absent' },
             { cwd: kickoff, command: 'set NODICS_FRAMEWORK_ROOT=../nodics.ai in .env', manual: true },
             { cwd: kickoff, command: 'npm run configure:framework' },
             { cwd: path.join(options.workspace, 'nodics.ai'), command: 'npm ci' },
             { cwd: kickoff, command: 'npm ci' },
             { cwd: exp, command: 'npm run apps:fetch -- --apps=' + apps, when: options.apps.length > 0 },
+            ...options.apps.map(app => ({
+                cwd: path.join(exp, FRONTEND_REPOSITORIES[app].name),
+                command: 'npm ci',
+                when: 'frontend app `' + app + '` is selected'
+            })),
             { cwd: exp, command: 'npm run apps:verify -- --apps=' + apps, when: options.apps.length > 0 },
-            { cwd: kickoff, command: 'npm run topology:preflight' + (options.apps.length > 0 ? ' -- --include-frontends' : '') },
+            { cwd: kickoff, command: 'npm run topology:preflight' },
             { cwd: kickoff, command: 'npm run topology:start:all', when: options.apps.length > 0 },
             { cwd: kickoff, command: 'npm run topology:start', when: options.apps.length === 0 },
             { cwd: kickoff, command: 'npm run acceptance:guided-initialization', when: options.accelerator !== 'common' }
         ];
+        return commands.filter(command => command.when !== false);
     },
 
     /** Builds the Docker Local command sequence. */
     dockerCommands: function (options) {
         const kickoff = path.join(options.workspace, 'nodics.kickoff');
-        return [
+        const commands = [
             { cwd: kickoff, command: 'cp .env.example .env', when: '.env is absent' },
             { cwd: kickoff, command: 'set NODICS_FRAMEWORK_ROOT=../nodics.ai in .env', manual: true },
             { cwd: kickoff, command: 'npm run configure:framework' },
@@ -165,6 +173,7 @@ module.exports = {
             { cwd: kickoff, command: 'npm run docker-local:start' },
             { cwd: kickoff, command: 'npm run docker-local:acceptance', when: options.accelerator !== 'common' }
         ];
+        return commands.filter(command => command.when !== false);
     },
 
     /** Creates a dry-run local setup plan. */

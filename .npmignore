@@ -1,0 +1,6 @@
+coverage/
+*.log
+.DS_Store
+.env
+.env.local
+generated/

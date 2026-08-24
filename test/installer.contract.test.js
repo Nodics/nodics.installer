@@ -34,6 +34,8 @@ test('creates a beginner local setup dry-run plan', () => {
     assert(plan.repositories.some(repository => repository.name === 'nodics.kickoff'));
     assert(plan.repositories.some(repository => repository.name === 'nodics.exp'));
     assert(plan.repositories.some(repository => repository.name === 'nodics.agora'));
+    assert.equal(plan.repositories.find(repository => repository.name === 'nodics.agora').targetPath,
+        '/tmp/nodicsRoot/nodics.exp/nodics.agora');
     assert(plan.commands.some(command => command.command === 'npm run configure:framework'));
     assert(plan.commands.some(command => command.command.includes('topology:start:all')));
     assert.equal(plan.expectedUrls.axis, 'http://localhost:3100');
