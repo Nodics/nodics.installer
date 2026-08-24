@@ -6,6 +6,12 @@ It exists so a beginner can start with one command, answer plain questions, and
 get a safe setup plan before cloning repositories, installing dependencies, or
 starting services.
 
+The repository follows the standard Nodics module-shaped package contract:
+`package.json`, `nodics.js`, `AGENTS.md`, `README.md`, `config/`, and focused
+tests are present so Nodics tooling and AI agents can identify ownership. It is
+still a non-runtime tooling package: `package.json.nodics.runtimeModule` and
+`package.json.nodics.loadableByNodicsModuleLoader` are both `false`.
+
 Current development command:
 
 ```bash
@@ -68,4 +74,3 @@ exist locally:
 - `nodics.kickoff` owns reference local runtime composition;
 - `nodics.exp` owns frontend app catalogue and workspace tooling;
 - Axis, Nexus, and Agora own their own application source and verification.
-

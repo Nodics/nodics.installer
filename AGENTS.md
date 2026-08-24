@@ -3,6 +3,10 @@
 `nodics.installer` is the standalone first-machine bootstrap repository for
 Nodics local setup.
 
+It follows the standard Nodics module-shaped package contract while remaining
+non-runtime tooling. Keep `package.json.nodics.runtimeModule` and
+`package.json.nodics.loadableByNodicsModuleLoader` set to `false`.
+
 Use this repository when a user does not yet have `nodics.ai`,
 `nodics.kickoff`, or `nodics.exp` locally. The installer asks beginner
 questions, creates a safe setup plan, downloads or reuses repositories, delegates
@@ -34,4 +38,3 @@ and writes local setup evidence.
   advanced sections require them.
 - Treat production certification, penetration testing, managed-provider
   resilience, and external accessibility review as separate evidence.
-

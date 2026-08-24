@@ -13,11 +13,29 @@
 
 const assert = require('node:assert');
 const childProcess = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const installer = require('../src/installer');
 
 const repoRoot = path.resolve(__dirname, '..');
+
+test('repository keeps the standard non-runtime Nodics module shape', async () => {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+    const nodicsRoot = require('../nodics');
+    assert.equal(packageJson.main, 'nodics.js');
+    assert.equal(packageJson.nodics.kind, 'tooling');
+    assert.equal(packageJson.nodics.displayName, 'Nodics Installer');
+    assert.equal(packageJson.nodics.runtimeModule, false);
+    assert.equal(packageJson.nodics.loadableByNodicsModuleLoader, false);
+    assert.deepEqual(packageJson.nodics.runtime, { router: false, publish: false, web: false });
+    assert(fs.existsSync(path.join(repoRoot, 'nodics.js')));
+    assert(fs.existsSync(path.join(repoRoot, 'config', 'properties.js')));
+    assert(fs.existsSync(path.join(repoRoot, 'config', 'prescripts.js')));
+    assert(fs.existsSync(path.join(repoRoot, 'config', 'postscripts.js')));
+    assert.equal(await nodicsRoot.init({}), true);
+    assert.equal(await nodicsRoot.postInit({}), true);
+});
 
 test('creates a beginner local setup dry-run plan', () => {
     const plan = installer.createSetupPlan(installer.parseOptions([
