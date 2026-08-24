@@ -2,68 +2,274 @@
 
 `nodics.installer` is the first-machine bootstrapper for Nodics.
 
-It exists so a beginner can start with one command, answer plain questions, and
-get a safe setup plan before cloning repositories, installing dependencies, or
-starting services.
+It is designed for a beginner who has just opened GitHub or the Nodics
+documentation and wants one guided command to prepare a local Nodics workspace.
+The user should not need to know repository names, module names, topology
+commands, or `.env` details before seeing a clear setup plan.
 
-The repository follows the standard Nodics module-shaped package contract:
+The package follows the standard Nodics module-shaped repository contract:
 `package.json`, `nodics.js`, `AGENTS.md`, `README.md`, `config/`, and focused
 tests are present so Nodics tooling and AI agents can identify ownership. It is
 still a non-runtime tooling package: `package.json.nodics.runtimeModule` and
 `package.json.nodics.loadableByNodicsModuleLoader` are both `false`.
 
-Current development command:
+## Quick Start
+
+Run the installer directly from GitHub:
 
 ```bash
 npx github:Nodics/nodics.installer
 ```
 
-Local development command from this repository:
+That command prints a dry-run setup plan. It does not clone repositories, install
+dependencies, start services, or write project files.
+
+For local development inside this repository:
 
 ```bash
 npm start
+npm test
 ```
 
-## Current Scope
+## Why This Exists
 
-The first implementation is intentionally non-destructive. It creates a
-beginner-readable setup plan for the reference Kickoff journey and prints the
-commands that later execution mode will run.
+`npm run setup:local` is useful only after a developer already has a Nodics
+project downloaded locally. A brand-new machine does not have `nodics.ai`,
+`nodics.kickoff`, or `nodics.exp` yet, so there is no local package script to
+run.
 
-It does not yet clone repositories, install dependencies, start services, or
-write setup evidence. Those actions must be added behind explicit approval and
-resume-safe execution.
+`nodics.installer` runs one step earlier. Its job is to:
 
-## Beginner Journeys
+1. ask beginner-friendly questions;
+2. create a safe setup plan;
+3. check local prerequisites;
+4. download or reuse required repositories;
+5. configure the Kickoff reference project;
+6. install dependencies;
+7. start the selected local topology when explicitly requested;
+8. guide initialization and acceptance;
+9. write resumable setup evidence.
 
-| Journey | Beginner intent | Status |
+## Actions
+
+The installer separates planning, checking, and execution so a beginner can see
+what will happen before the machine is changed.
+
+| Action | Command | What it does |
 | --- | --- | --- |
-| Run Nodics locally | Try Nodics with the reference Kickoff project. | Planned first. |
-| Create my own project | Generate a customer project instead of using Kickoff. | Deferred until the local setup journey is stable. |
+| Plan | `npx github:Nodics/nodics.installer` | Prints the setup plan only. |
+| Questionnaire | `npx github:Nodics/nodics.installer --action=questionnaire` | Asks guided questions, then prints a plan. |
+| Preflight | `npx github:Nodics/nodics.installer --action=preflight` | Checks Node.js, npm, Git, optional Docker, workspace parent, and expected ports. |
+| Execute | `npx github:Nodics/nodics.installer --action=execute --yes` | Runs the selected setup level and writes evidence. |
 
-## Example
+Execution never runs unless `--yes` is present.
+
+## Beginner Journey
+
+The currently implemented journey is:
 
 ```bash
-npm start -- --workspace=/Users/me/Projects/nodicsRoot --apps=axis,nexus,agora --accelerator=apparel
+npx github:Nodics/nodics.installer \
+  --workspace=/Users/me/Projects/nodicsRoot \
+  --mode=node \
+  --apps=axis,nexus,agora \
+  --accelerator=apparel
 ```
 
-For structured output:
+This plans a reference local setup using:
+
+- `nodics.ai` for the framework;
+- `nodics.kickoff` for the reference customer project;
+- `nodics.exp` for the frontend workspace;
+- `nodics.axis` for BackOffice;
+- `nodics.nexus` for the corporate site;
+- `nodics.agora` for the storefront.
+
+The custom project journey is intentionally still blocked. The installer reports
+that path as deferred until the reference local setup is stable enough to become
+the reusable base for project creation.
+
+## Questions The Installer Asks
+
+The questionnaire uses plain setup language:
+
+1. Setup style: reference project or custom project.
+2. Workspace folder: where Nodics should live.
+3. Runtime mode: direct Node.js local processes or Docker Local.
+4. Applications: Axis, Nexus, Agora, or a subset.
+5. Accelerator: common, apparel, electronics, telco, or combined.
+6. Repository access: HTTPS, SSH, or existing local repositories.
+7. Branch or tag: normally `development` for active development.
+
+Example:
 
 ```bash
-npm start -- --json
+npx github:Nodics/nodics.installer --action=questionnaire
 ```
 
-## What The Plan Explains
+## Execution Levels
 
-- required machine checks;
-- repositories to clone or reuse;
-- frontend apps selected from `nodics.exp/apps.json`;
-- selected starter accelerator;
-- Kickoff configuration steps;
-- dependency installation order;
-- direct Node local or Docker Local preflight/start commands;
-- guided initialization and validation choices;
-- safety rules and setup evidence fields.
+Execution levels let a user stop after the amount of work they are comfortable
+with.
+
+| Level | What happens |
+| --- | --- |
+| `download` | Create the workspace and clone or reuse repositories. |
+| `install` | Download/reuse repositories, configure Kickoff, and install dependencies. |
+| `preflight` | Run download, configure, install, then machine and topology preflight. This is the default execution level. |
+| `start` | Run everything through preflight, then start the selected topology. |
+| `initialize` | Start services and run guided initialization when selected. |
+| `acceptance` | Run the longest local validation path when `--acceptance` is also selected. |
+
+Examples:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=execute \
+  --yes \
+  --execution-level=download \
+  --workspace=/Users/me/Projects/nodicsRoot
+```
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=execute \
+  --yes \
+  --execution-level=start \
+  --accelerator=combined \
+  --apps=axis,nexus,agora
+```
+
+## Repository Download Modes
+
+Use HTTPS for the easiest first run:
+
+```bash
+--clone=https
+```
+
+Use SSH when the developer already has GitHub SSH access configured:
+
+```bash
+--clone=ssh
+```
+
+Use existing mode when repositories are already present and should not be
+downloaded:
+
+```bash
+--clone=existing
+```
+
+Existing repositories must be clean. The installer refuses dirty checkouts
+instead of resetting or overwriting local work.
+
+## Accelerator Profiles
+
+Accelerators choose the starter business experience. Some accelerators require
+an application even if the user did not type it explicitly.
+
+| Accelerator | Domains | Required apps | Data packs |
+| --- | --- | --- | --- |
+| `common` | common | none | `nexusWebData`, `agoraCommonData` |
+| `apparel` | common, apparel | Agora | `agoraCommonData`, `agoraApparelData` |
+| `electronics` | common, electronics | Agora | `agoraCommonData`, `agoraElectronicsData` |
+| `telco` | common, electronics, telco | Agora | `agoraCommonData`, `agoraTelcoData` |
+| `combined` | common, apparel, electronics, telco | Agora, Nexus | all listed starter packs |
+
+## Node Local And Docker Local
+
+Direct Node local mode is the fastest developer loop:
+
+```bash
+--mode=node
+```
+
+Expected URLs include:
+
+- Axis: `http://localhost:3100`
+- Nexus: `http://localhost:3200`
+- Agora: `http://localhost:3300`
+- Platform API: `http://localhost:4300`
+- WCMS Staged API: `http://localhost:4312`
+- WCMS Online API: `http://localhost:4314`
+- Process API: `http://localhost:4330`
+- Engagement API: `http://localhost:4340`
+- Commerce API: `http://localhost:4350`
+
+Docker Local is for a more isolated production-simulation setup:
+
+```bash
+--mode=docker
+```
+
+Expected URLs use the Docker Local port range, for example Axis at
+`http://localhost:4100` and Platform at `http://localhost:5300`.
+
+## Enterprise Options
+
+Enterprise options are recorded in the plan and used where supported:
+
+```bash
+--proxy=http://proxy.company.local:8080
+--npm-registry=https://registry.company.local
+--offline-cache=/Volumes/nodics-cache
+--policy-pack=/Users/me/company/nodics-policy
+```
+
+These options are intentionally advanced. A beginner should not need them for
+the normal first local run.
+
+## Evidence
+
+Execution writes a resumable evidence file:
+
+```text
+<workspace>/.nodics-installer/setup-evidence.json
+```
+
+The evidence contains:
+
+- installer version;
+- selected journey, mode, apps, accelerator, release, and workspace;
+- repositories and target paths;
+- setup stages completed;
+- command results;
+- preflight results;
+- expected local URLs.
+
+Secrets are sanitized from command output before evidence is written.
+
+## Safety Rules
+
+The installer follows these rules:
+
+- plan and preflight do not mutate project repositories;
+- execute requires `--yes`;
+- dangerous workspace paths such as `/` or the home directory are refused;
+- dirty existing repositories are refused;
+- no destructive Git reset is used;
+- secrets are not printed in normal logs or setup evidence;
+- local setup evidence never claims production certification.
+
+## Current Status
+
+Version `0.2.0` implements the WP-I1 to WP-I7 foundation:
+
+- guided option parsing and questionnaire support;
+- reference journey setup planning;
+- Node Local and Docker Local command plans;
+- accelerator mapping;
+- prerequisite and port preflight;
+- safe clone/reuse execution;
+- Kickoff `.env` framework linking;
+- dependency install orchestration;
+- resumable setup evidence;
+- module-shaped repository compliance tests.
+
+The full runtime stack was not started during repository tests. The test suite
+uses focused contract checks and injected execution stages so the installer can
+be validated without cloning or starting every Nodics service.
 
 ## Repository Boundary
 

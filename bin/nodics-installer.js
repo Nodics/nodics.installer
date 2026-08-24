@@ -14,9 +14,7 @@
 
 const installer = require('../src/installer');
 
-try {
-    installer.run(process.argv.slice(2));
-} catch (error) {
+Promise.resolve(installer.run(process.argv.slice(2))).catch(error => {
     console.error(error && error.stack ? error.stack : error);
     process.exitCode = 1;
-}
+});
