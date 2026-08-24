@@ -1,0 +1,34 @@
+{
+  "name": "nodics.installer",
+  "version": "0.1.0",
+  "description": "Standalone Nodics first-machine installer and local setup planner.",
+  "type": "commonjs",
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "node": ">=22 <27",
+    "npm": ">=10 <12"
+  },
+  "bin": {
+    "nodics.installer": "bin/nodics-installer.js"
+  },
+  "scripts": {
+    "start": "node bin/nodics-installer.js",
+    "test": "node --test test/installer.contract.test.js"
+  },
+  "nodics": {
+    "kind": "installer",
+    "runtimeModule": false,
+    "loadableByNodicsModuleLoader": false,
+    "owns": [
+      "first-machine-bootstrap",
+      "setup-plan",
+      "installer-evidence"
+    ],
+    "doesNotOwn": [
+      "framework-runtime",
+      "customer-project-runtime",
+      "frontend-application-source",
+      "backend-importable-data"
+    ]
+  }
+}

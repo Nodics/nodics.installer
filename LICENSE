@@ -1,0 +1,42 @@
+NODICS SOURCE-AVAILABLE COMMERCIAL LICENSE
+
+Copyright (c) 2026 Nodics. All rights reserved.
+
+Nodics is source-available commercial software. This repository is provided so
+authorized customers, partners, and contributors can inspect, evaluate,
+customize, and extend the Nodics framework under the permissions granted by a
+separate written agreement with Nodics.
+
+1. Commercial Product
+
+Nodics is a Commercial Product. Possession of this source code does not grant an
+open-source license, patent license, trademark license, resale right,
+white-label right, or production-use right unless that right is explicitly
+granted by a separate written agreement.
+
+2. Permitted Use
+
+You may use, copy, modify, deploy, or distribute this software only as permitted
+by a written commercial, partner, evaluation, or contributor agreement with
+Nodics. Customer-specific modules may extend Nodics behavior through the
+documented customization contracts, but must not remove license notices or
+misrepresent Nodics ownership.
+
+3. Restricted Use
+
+Unless expressly permitted in writing, you may not sell, sublicense, publish,
+host as a competing framework service, remove notices, bypass license checks, or
+use this software to create a substantially similar platform product.
+
+4. No Warranty
+
+This software is provided under the terms of the applicable agreement. Except
+where that agreement states otherwise, the software is provided without implied
+warranties of merchantability, fitness for a particular purpose, or
+non-infringement.
+
+5. Agreement Priority
+
+If this license conflicts with a separate written agreement signed by Nodics,
+the signed agreement controls for the covered customer, partner, contributor, or
+deployment scope.
