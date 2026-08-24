@@ -151,6 +151,10 @@ const installer = {
             '  npx github:Nodics/nodics.installer [options]',
             '  npm start -- [options]',
             '',
+            'Default start:',
+            '  With no options in an interactive terminal, the installer asks guided',
+            '  questions first. In non-interactive shells it prints the default plan.',
+            '',
             'Beginner actions:',
             '  --action=plan             Print the setup plan only. Default.',
             '  --action=questionnaire    Ask guided setup questions, then print a plan.',
@@ -298,6 +302,20 @@ const installer = {
             cloneMode: answers.cloneMode,
             release: answers.release
         };
+    },
+
+    shouldRunStartupQuestionnaire: function (args, options, streams) {
+        const input = streams && streams.input ? streams.input : process.stdin;
+        const output = streams && streams.output ? streams.output : process.stdout;
+        const hasExplicitAction = (args || []).some(argument => argument.startsWith('--action='));
+        const hasHelp = this.hasFlag(args, '--help');
+        return !hasHelp &&
+            !hasExplicitAction &&
+            (args || []).length === 0 &&
+            options.action === 'plan' &&
+            !options.json &&
+            Boolean(input.isTTY) &&
+            Boolean(output.isTTY);
     },
 
     validateOptions: function (options) {
@@ -893,13 +911,13 @@ const installer = {
         console.log(options.json ? JSON.stringify(result, null, 2) : textRenderer(result));
     },
 
-    run: async function (args) {
+    run: async function (args, runtime) {
         if (this.hasFlag(args, '--help')) {
             console.log(this.usage());
             return true;
         }
         let options = this.parseOptions(args);
-        if (options.action === 'questionnaire') {
+        if (options.action === 'questionnaire' || this.shouldRunStartupQuestionnaire(args, options, runtime)) {
             options = await this.runQuestionnaire(options);
         }
         const plan = this.createSetupPlan(options);

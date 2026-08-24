@@ -150,6 +150,26 @@ test('questionnaire answers merge into normal options', async () => {
     assert.equal(options.release, 'master');
 });
 
+test('bare interactive startup asks guided questions', () => {
+    const options = installer.parseOptions([]);
+    assert.equal(installer.shouldRunStartupQuestionnaire([], options, {
+        input: { isTTY: true },
+        output: { isTTY: true }
+    }), true);
+    assert.equal(installer.shouldRunStartupQuestionnaire(['--action=plan'], installer.parseOptions(['--action=plan']), {
+        input: { isTTY: true },
+        output: { isTTY: true }
+    }), false);
+    assert.equal(installer.shouldRunStartupQuestionnaire(['--json'], installer.parseOptions(['--json']), {
+        input: { isTTY: true },
+        output: { isTTY: true }
+    }), false);
+    assert.equal(installer.shouldRunStartupQuestionnaire([], options, {
+        input: { isTTY: false },
+        output: { isTTY: true }
+    }), false);
+});
+
 test('preflight reports command and port checks without mutating repositories', async () => {
     const workspace = path.join(os.tmpdir(), 'nodics-installer-preflight-test');
     const options = installer.parseOptions(['--workspace=' + workspace, '--action=preflight', '--apps=axis']);

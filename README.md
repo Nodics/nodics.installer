@@ -21,8 +21,20 @@ Run the installer directly from GitHub:
 npx github:Nodics/nodics.installer
 ```
 
-That command prints a dry-run setup plan. It does not clone repositories, install
-dependencies, start services, or write project files.
+When started from a normal terminal, that command asks guided questions first:
+application name, workspace folder, local mode, Axis selection, accelerator,
+repository access, and release branch. After the answers, it prints a dry-run
+setup plan. It does not clone repositories, install dependencies, start services,
+or write project files.
+
+To skip questions and print a plan directly:
+
+```bash
+npx github:Nodics/nodics.installer --action=plan --application-name="Acme Apparel"
+```
+
+In non-interactive shells, such as CI or JSON piping, the installer also avoids
+prompts and prints deterministic output from provided options.
 
 For local development inside this repository:
 
@@ -99,7 +111,7 @@ what will happen before the machine is changed.
 
 | Action | Command | What it does |
 | --- | --- | --- |
-| Plan | `npx github:Nodics/nodics.installer` | Prints the setup plan only. |
+| Plan | `npx github:Nodics/nodics.installer --action=plan` | Prints the setup plan only. |
 | Questionnaire | `npx github:Nodics/nodics.installer --action=questionnaire` | Asks guided questions, then prints a plan. |
 | Preflight | `npx github:Nodics/nodics.installer --action=preflight` | Checks Node.js, npm, Git, optional Docker, workspace parent, and expected ports. |
 | Execute | `npx github:Nodics/nodics.installer --action=execute --yes` | Runs the selected setup level and writes evidence. |
