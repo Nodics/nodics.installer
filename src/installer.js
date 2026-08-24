@@ -18,7 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 const REBRAND_STAGE_VERSION = VERSION + ':project-runtime-identity-v5';
 const START_STAGE_VERSION = VERSION + ':detached-topology-start-v1';
 const VALID_JOURNEYS = new Set(['reference', 'project']);
@@ -27,7 +27,7 @@ const VALID_APPS = new Set(['axis']);
 const VALID_ACCELERATORS = new Set(['common', 'apparel', 'electronics', 'telco', 'combined']);
 const VALID_ACTIONS = new Set([
     'plan', 'questionnaire', 'preflight', 'doctor', 'execute', 'status', 'start', 'stop', 'restart', 'logs',
-    'initialize', 'acceptance', 'repair', 'clean', 'version'
+    'initialize', 'acceptance', 'repair', 'clean', 'troubleshooting', 'version'
 ]);
 const MUTATING_ACTIONS = new Set(['execute', 'start', 'stop', 'restart', 'initialize', 'acceptance', 'repair', 'clean']);
 const VALID_EXECUTION_LEVELS = new Set(['download', 'install', 'preflight', 'start', 'initialize', 'acceptance']);
@@ -245,6 +245,7 @@ const installer = {
             '  --action=acceptance --yes Run local acceptance checks.',
             '  --action=repair --yes     Reapply installer identity and framework links.',
             '  --action=clean --yes      Remove generated runtime files only.',
+            '  --action=troubleshooting  Print known beginner failure signatures.',
             '  --action=version          Show installer version and supported actions.',
             '',
             'Options:',
@@ -487,7 +488,7 @@ const installer = {
             errors.push('Unknown accelerator `' + options.accelerator + '`. Use common, apparel, electronics, telco, or combined.');
         }
         if (!VALID_ACTIONS.has(options.action)) {
-            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, or version.');
+            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, troubleshooting, or version.');
         }
         if (!VALID_EXECUTION_LEVELS.has(options.executionLevel)) {
             errors.push('Unknown execution level `' + options.executionLevel + '`.');
@@ -663,7 +664,7 @@ const installer = {
             writePerformed: false,
             executionSupported: true,
             installer: {
-                packageName: 'nodics.installer',
+                packageName: this.readJsonFile(path.resolve(__dirname, '..', 'package.json')).name,
                 version: VERSION,
                 bootstrapCommand: 'npx github:Nodics/nodics.installer'
             },
@@ -1830,6 +1831,72 @@ const installer = {
         return lines.join('\n');
     },
 
+    failureCatalog: function () {
+        return [
+            {
+                code: 'node-version',
+                signal: 'node --version is outside the supported engine range',
+                fix: 'Install Node.js 22 or 24 and npm 10 or 11, then rerun doctor.'
+            },
+            {
+                code: 'git-access',
+                signal: 'git clone, fetch, or switch cannot reach the selected branch',
+                fix: 'Check GitHub access, SSH keys, enterprise proxy, and --release.'
+            },
+            {
+                code: 'dirty-repository',
+                signal: 'Refusing to reuse dirty repository',
+                fix: 'Commit, stash, or move local edits before installer reuse.'
+            },
+            {
+                code: 'npm-install',
+                signal: 'npm ci or npm install fails',
+                fix: 'Check npm registry, proxy, lockfile health, and Node/npm versions.'
+            },
+            {
+                code: 'runtime-prerequisite',
+                signal: 'MongoDB, Redis, or Elasticsearch is unavailable',
+                fix: 'Start the local service required by the selected topology, then rerun preflight.'
+            },
+            {
+                code: 'busy-port',
+                signal: 'preflight reports port-NNNN failed',
+                fix: 'Stop the process holding the port or change the local topology port.'
+            },
+            {
+                code: 'docker-daemon',
+                signal: 'Docker CLI exists but docker info cannot reach the daemon',
+                fix: 'Start Docker Desktop or set NODICS_DOCKER_BIN before Docker Local start.'
+            },
+            {
+                code: 'wcms-import-records',
+                signal: 'Import completed with record-level errors',
+                fix: 'Open the listed import error artifact and inspect WCMS Staged logs.'
+            },
+            {
+                code: 'media-reference-missing',
+                signal: 'Media reference was not found or agoraComponentMediaData fails',
+                fix: 'Import active media references before component-media, then rerun initialize.'
+            }
+        ];
+    },
+
+    troubleshootingStatus: function () {
+        return {
+            operation: 'local-setup-troubleshooting',
+            ok: true,
+            failures: this.failureCatalog()
+        };
+    },
+
+    renderTroubleshooting: function (result) {
+        const lines = ['Nodics Installer troubleshooting catalog'];
+        result.failures.forEach(failure => {
+            lines.push('', failure.code, 'signal: ' + failure.signal, 'fix: ' + failure.fix);
+        });
+        return lines.join('\n');
+    },
+
     cleanGeneratedRuntime: function (options) {
         const topology = this.readTopologyStatus(options);
         if (this.topologyIsReady(topology.status)) {
@@ -2070,6 +2137,11 @@ const installer = {
         if (options.action === 'logs') {
             const result = this.logsStatus(options);
             this.printResult(options, result, logs => this.renderLogs(logs));
+            return true;
+        }
+        if (options.action === 'troubleshooting') {
+            const result = this.troubleshootingStatus();
+            this.printResult(options, result, troubleshooting => this.renderTroubleshooting(troubleshooting));
             return true;
         }
         if (options.action === 'start') {

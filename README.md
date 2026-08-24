@@ -1,6 +1,7 @@
 # Nodics Installer
 
-`nodics.installer` is the first-machine bootstrapper for Nodics.
+`nodics.installer` is the first-machine bootstrapper repository for Nodics.
+Its npm package identity is `@nodics/installer`.
 
 It is designed for a beginner who has just opened GitHub or the Nodics
 documentation and wants one guided command to prepare a local Nodics workspace.
@@ -67,16 +68,16 @@ the installer is published to npm.
 npx @nodics/installer
 ```
 
-This will work only after Nodics publishes an npm package named
+This will work only after Nodics publishes the current package named
 `@nodics/installer` under the `@nodics` npm scope. At that point npm is the
-registry of record, and the package can still point back to this GitHub
-repository through its package metadata.
+registry of record, and the package points back to this GitHub repository
+through its package metadata.
 
 The current enterprise-safe publication decision is:
 
 1. use `npx github:Nodics/nodics.installer` for public GitHub bootstrap now;
 2. keep the repository named `nodics.installer`;
-3. publish `@nodics/installer` later when the Nodics npm organization, package
+3. publish the package `@nodics/installer` later when the Nodics npm organization, package
    ownership, release signing, and support policy are ready.
 
 ## Prerequisite Software
@@ -166,6 +167,7 @@ what will happen before the machine is changed.
 | Acceptance | `npx github:Nodics/nodics.installer --action=acceptance --yes` | Starts if needed, then runs local acceptance checks. |
 | Repair | `npx github:Nodics/nodics.installer --action=repair --yes` | Reapplies installer identity and framework links without recloning. |
 | Clean | `npx github:Nodics/nodics.installer --action=clean --yes` | Removes generated runtime files only; refuses while topology is running. |
+| Troubleshooting | `npx github:Nodics/nodics.installer --action=troubleshooting` | Prints known beginner failure signatures and first fixes. |
 | Version | `npx github:Nodics/nodics.installer --action=version` | Prints installer version, engines, and supported actions. |
 
 Mutating actions never run unless `--yes` is present. This includes `execute`,
@@ -412,6 +414,15 @@ Enterprise options are recorded in the plan and used where supported:
 These options are intentionally advanced. A beginner should not need them for
 the normal first local run.
 
+## Enterprise Readiness
+
+The detailed enterprise checklist is maintained in
+[docs/enterprise-readiness.md](docs/enterprise-readiness.md). It covers release
+tagging, npm publication readiness, fresh-machine simulation, resume/recovery,
+the failure catalog, acceptance gate split, Docker Local validation, generated
+identity verification, security review, OS support, policy packs, telemetry,
+rollback, upgrades, template contracts, and the beginner walkthrough.
+
 ## Evidence
 
 Execution writes a resumable evidence file:
@@ -581,8 +592,8 @@ The installer follows these rules:
 
 ## Current Status
 
-Version `0.6.0` implements the multi-site application identity, Docker identity
-cleanup, and local operations setup contract:
+Version `0.7.0` implements the multi-site application identity, Docker identity
+cleanup, npm package readiness, and local operations setup contract:
 
 - guided option parsing and questionnaire support;
 - named backend project, company site, and commerce site setup planning;
@@ -596,7 +607,9 @@ cleanup, and local operations setup contract:
 - dependency install orchestration;
 - resumable setup evidence;
 - status, logs, start, stop, restart, initialize, acceptance, repair, clean, and version actions;
+- troubleshooting failure catalog action;
 - structured beginner diagnostics for initialization and acceptance command failures;
+- CI release check for Node.js 22 and 24 plus package smoke test;
 - module-shaped repository compliance tests.
 
 The full runtime stack was not started during repository tests. The test suite

@@ -24,8 +24,12 @@ const repoRoot = path.resolve(__dirname, '..');
 test('repository keeps the standard non-runtime Nodics module shape', async () => {
     const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     const nodicsRoot = require('../nodics');
+    assert.equal(packageJson.name, '@nodics/installer');
     assert.equal(packageJson.main, 'nodics.js');
-    assert.equal(packageJson.version, '0.6.0');
+    assert.equal(packageJson.version, '0.7.0');
+    assert.equal(packageJson.repository.url, 'git+https://github.com/Nodics/nodics.installer.git');
+    assert.equal(packageJson.publishConfig.access, 'public');
+    assert(packageJson.files.includes('docs/'));
     assert.equal(packageJson.nodics.kind, 'tooling');
     assert.equal(packageJson.nodics.displayName, 'Nodics Installer');
     assert.equal(packageJson.nodics.runtimeModule, false);
@@ -56,7 +60,8 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.dryRun, true);
     assert.equal(plan.writePerformed, false);
     assert.equal(plan.executionSupported, true);
-    assert.equal(plan.installer.version, '0.6.0');
+    assert.equal(plan.installer.packageName, '@nodics/installer');
+    assert.equal(plan.installer.version, '0.7.0');
     assert.equal(plan.installer.bootstrapCommand, 'npx github:Nodics/nodics.installer');
     assert.equal(plan.beginnerChoices.application.name, 'Acme');
     assert.equal(plan.beginnerChoices.application.code, 'acme');
@@ -531,11 +536,21 @@ test('doctor returns prerequisite fix guidance', async () => {
 test('version action exposes supported actions without requiring workspace validation', async () => {
     const result = installer.versionInfo();
     assert.equal(result.operation, 'local-installer-version');
-    assert.equal(result.version, '0.6.0');
+    assert.equal(result.packageName, '@nodics/installer');
+    assert.equal(result.version, '0.7.0');
     assert(result.actions.includes('status'));
     assert(result.actions.includes('repair'));
+    assert(result.actions.includes('troubleshooting'));
     assert(result.mutatingActions.includes('clean'));
     assert.match(installer.renderVersion(result), /Mutating actions require --yes/);
+});
+
+test('troubleshooting action exposes beginner failure catalog', async () => {
+    const result = installer.troubleshootingStatus();
+    assert.equal(result.operation, 'local-setup-troubleshooting');
+    assert(result.failures.some(failure => failure.code === 'docker-daemon'));
+    assert(result.failures.some(failure => failure.code === 'media-reference-missing'));
+    assert.match(installer.renderTroubleshooting(result), /Docker Desktop/);
 });
 
 test('operational failures include beginner import diagnostics', () => {
@@ -714,6 +729,14 @@ test('CLI prints structured JSON', () => {
         { cwd: repoRoot, encoding: 'utf8' });
     const parsed = JSON.parse(output);
     assert.equal(parsed.operation, 'local-setup-plan');
-    assert.equal(parsed.installer.packageName, 'nodics.installer');
-    assert.equal(parsed.installer.version, '0.6.0');
+    assert.equal(parsed.installer.packageName, '@nodics/installer');
+    assert.equal(parsed.installer.version, '0.7.0');
+});
+
+test('release workflow validates installer package', () => {
+    const workflowPath = path.join(repoRoot, '.github', 'workflows', 'release-check.yml');
+    const workflow = fs.readFileSync(workflowPath, 'utf8');
+    assert.match(workflow, /development/);
+    assert.match(workflow, /npm test/);
+    assert.match(workflow, /npm pack --dry-run/);
 });

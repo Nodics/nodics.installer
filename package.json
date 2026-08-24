@@ -1,16 +1,42 @@
 {
-  "name": "nodics.installer",
-  "version": "0.6.0",
+  "name": "@nodics/installer",
+  "version": "0.7.0",
   "description": "Standalone Nodics first-machine installer and local setup executor.",
   "main": "nodics.js",
   "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/Nodics/nodics.installer#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nodics/nodics.installer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Nodics/nodics.installer/issues"
+  },
+  "keywords": [
+    "nodics",
+    "installer",
+    "application-builder",
+    "local-setup",
+    "developer-onboarding"
+  ],
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    "LICENSE",
+    "bin/",
+    "config/",
+    "docs/",
+    "nodics.js",
+    "src/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22 <27",
     "npm": ">=10 <12"
   },
-  "bin": {
-    "nodics.installer": "bin/nodics-installer.js"
-  },
+  "bin": "bin/nodics-installer.js",
   "scripts": {
     "start": "node bin/nodics-installer.js",
     "test": "node --test test/installer.contract.test.js"
