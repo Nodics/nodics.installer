@@ -22,15 +22,21 @@ npx github:Nodics/nodics.installer
 ```
 
 When started from a normal terminal, that command asks guided questions first:
-application name, workspace folder, local mode, Axis selection, accelerator,
-repository access, and release branch. After the answers, it prints a dry-run
-setup plan. It does not clone repositories, install dependencies, start services,
-or write project files.
+application name, backend project folder, company site folder, commerce site
+folder, workspace folder, local mode, Axis selection, accelerator, repository
+access, and release branch. After the answers, it prints a dry-run setup plan.
+It does not clone repositories, install dependencies, start services, or write
+project files.
 
 To skip questions and print a plan directly:
 
 ```bash
-npx github:Nodics/nodics.installer --action=plan --application-name="Acme Apparel"
+npx github:Nodics/nodics.installer \
+  --action=plan \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel
 ```
 
 In non-interactive shells, such as CI or JSON piping, the installer also avoids
@@ -77,13 +83,18 @@ Before running execution, use preflight:
 ```bash
 npx github:Nodics/nodics.installer \
   --action=preflight \
-  --workspace=/Users/me/Projects/nodicsRoot
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
 ```
 
-Installer preflight currently checks Node.js, npm, Git, optional Docker, the
-workspace parent, and expected local ports. Runtime-service checks for MongoDB,
-Redis, Elasticsearch, and profile-specific dependencies remain owned by the
-application project's topology preflight after repositories are available.
+Installer preflight checks Node.js, npm, Git, MongoDB, Redis, Elasticsearch,
+optional Docker, the workspace parent, and expected local ports. MongoDB, Redis,
+and Elasticsearch are treated as local runtime dependencies: the installer
+reports clear guidance, while the project topology preflight remains the final
+authority after repositories are available.
 
 ## Why This Exists
 
@@ -113,7 +124,8 @@ what will happen before the machine is changed.
 | --- | --- | --- |
 | Plan | `npx github:Nodics/nodics.installer --action=plan` | Prints the setup plan only. |
 | Questionnaire | `npx github:Nodics/nodics.installer --action=questionnaire` | Asks guided questions, then prints a plan. |
-| Preflight | `npx github:Nodics/nodics.installer --action=preflight` | Checks Node.js, npm, Git, optional Docker, workspace parent, and expected ports. |
+| Preflight | `npx github:Nodics/nodics.installer --action=preflight` | Checks Node.js, npm, Git, runtime dependencies, optional Docker, workspace parent, and expected ports. |
+| Doctor | `npx github:Nodics/nodics.installer --action=doctor` | Prints preflight checks with beginner fix guidance. |
 | Execute | `npx github:Nodics/nodics.installer --action=execute --yes` | Runs the selected setup level and writes evidence. |
 
 Execution never runs unless `--yes` is present.
@@ -124,8 +136,11 @@ The currently implemented journey is:
 
 ```bash
 npx github:Nodics/nodics.installer \
-  --application-name="Acme Apparel" \
-  --workspace=/Users/me/Projects/nodicsRoot \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer \
   --mode=node \
   --apps=axis \
   --accelerator=apparel
@@ -134,14 +149,28 @@ npx github:Nodics/nodics.installer \
 This plans a local setup using:
 
 - `nodics.ai` for the framework;
-- `acme-apparel` for the customer application project;
+- `acme.project` for the customer backend application project;
 - `nodics.axis` for BackOffice, unchanged;
-- `acme-apparel.web` for the customer-facing web app.
+- `acme` for the company site, derived from the Nexus template;
+- `acme-apparel` for the apparel commerce site, derived from the Agora template.
 
 Starter templates may still be used internally, but the user's local workspace,
 environment identity, evidence, and beginner plan use the application name. The
 user should not need to choose or work inside folders named Kickoff, Agora, or
 Nexus.
+
+Inside the generated backend project, installer-owned source identity is also
+derived from the application name. For the Acme example, the customer project
+uses:
+
+- `modules/acmeCore` for shared customer behavior;
+- `modules/acmeApi` for customer API customizations;
+- `modules/acmeInt` for customer integration customizations;
+- `envs/acmeLocal` for direct Node.js local runtime composition;
+- `envs/acmeDockerLocal` for Docker Local production-simulation composition.
+
+The framework repository remains `nodics.ai` and the BackOffice application
+remains `nodics.axis`. Only customer-owned template identity is renamed.
 
 The custom project journey is intentionally still blocked. The installer reports
 that path as deferred until the reference local setup is stable enough to become
@@ -152,13 +181,16 @@ the reusable base for project creation.
 The questionnaire uses plain setup language:
 
 1. Setup style: reference project or custom project.
-2. Application name: the customer application name used for folders, identity, and evidence.
-3. Workspace folder: where Nodics should live.
-4. Runtime mode: direct Node.js local processes or Docker Local.
-5. Standard applications: Axis or no standard app.
-6. Accelerator: common, apparel, electronics, telco, or combined.
-7. Repository access: HTTPS, SSH, or existing local repositories.
-8. Branch or tag: normally `development` for active development.
+2. Application name: the customer name used for identity and evidence.
+3. Commerce site folder: for example `acme-apparel`.
+4. Company site folder: for example `acme`.
+5. Backend project folder: for example `acme.project`.
+6. Workspace folder: where Nodics should live.
+7. Runtime mode: direct Node.js local processes or Docker Local.
+8. Standard applications: Axis or no standard app.
+9. Accelerator: common, apparel, electronics, telco, or combined.
+10. Repository access: HTTPS, SSH, or existing local repositories.
+11. Branch or tag: normally `development` for active development.
 
 Example:
 
@@ -174,8 +206,8 @@ with.
 | Level | What happens |
 | --- | --- |
 | `download` | Create the workspace and clone or reuse repositories. |
-| `install` | Download/reuse repositories, configure the application project, and install dependencies. |
-| `preflight` | Run download, configure, install, then machine and topology preflight. This is the default execution level. |
+| `install` | Download/reuse repositories, apply identity, install framework dependencies, configure the application project, and install project/frontend dependencies. |
+| `preflight` | Run download, identity, framework install, configure, dependency install, machine checks, and topology preflight. This is the default execution level. |
 | `start` | Run everything through preflight, then start the selected topology. |
 | `initialize` | Start services and run guided initialization when selected. |
 | `acceptance` | Run the longest local validation path when `--acceptance` is also selected. |
@@ -197,8 +229,11 @@ npx github:Nodics/nodics.installer \
   --action=execute \
   --yes \
   --execution-level=download \
-  --application-name="Acme Apparel" \
-  --workspace=/Users/me/Projects/nodicsRoot
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --workspace=/Users/me/Projects/NodicsCustomer
 ```
 
 ```bash
@@ -206,8 +241,11 @@ npx github:Nodics/nodics.installer \
   --action=execute \
   --yes \
   --execution-level=start \
-  --application-name="Acme Apparel" \
-  --accelerator=combined \
+  --application-name=Acme \
+  --project-name=acme.project \
+  --company-site-name=acme \
+  --commerce-site-name=acme-apparel \
+  --accelerator=apparel \
   --apps=axis
 ```
 
@@ -260,7 +298,8 @@ Direct Node local mode is the fastest developer loop:
 Expected URLs include:
 
 - Axis: `http://localhost:3100`
-- Application web app: `http://localhost:3300`
+- Company site: `http://localhost:3200`
+- Commerce site: `http://localhost:3300`
 - Platform API: `http://localhost:4300`
 - WCMS Staged API: `http://localhost:4312`
 - WCMS Online API: `http://localhost:4314`
@@ -275,7 +314,8 @@ Docker Local is for a more isolated production-simulation setup:
 ```
 
 Expected URLs use the Docker Local port range, for example Axis at
-`http://localhost:4100` and Platform at `http://localhost:5300`.
+`http://localhost:4100`, company site at `http://localhost:4200`, commerce site
+at `http://localhost:4300`, and Platform at `http://localhost:5300`.
 
 ## Enterprise Options
 
@@ -325,14 +365,16 @@ The installer follows these rules:
 
 ## Current Status
 
-Version `0.3.0` implements the application-name-first setup contract:
+Version `0.4.0` implements the multi-site application identity setup contract:
 
 - guided option parsing and questionnaire support;
-- named application journey setup planning;
+- named backend project, company site, and commerce site setup planning;
 - Node Local and Docker Local command plans;
 - accelerator mapping;
-- prerequisite and port preflight;
+- prerequisite, doctor, and port preflight;
 - safe clone/reuse execution;
+- template rebranding, customer module/environment renaming, and local identity files;
+- framework-first dependency installation;
 - application `.env` framework and identity linking;
 - dependency install orchestration;
 - resumable setup evidence;

@@ -1,6 +1,6 @@
 {
   "name": "nodics.installer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Standalone Nodics first-machine installer and local setup executor.",
   "main": "nodics.js",
   "license": "SEE LICENSE IN LICENSE",
