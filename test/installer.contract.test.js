@@ -26,7 +26,7 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
     const nodicsRoot = require('../nodics');
     assert.equal(packageJson.name, '@nodics/installer');
     assert.equal(packageJson.main, 'nodics.js');
-    assert.equal(packageJson.version, '0.7.0');
+    assert.equal(packageJson.version, '0.7.1');
     assert.equal(packageJson.repository.url, 'git+https://github.com/Nodics/nodics.installer.git');
     assert.equal(packageJson.publishConfig.access, 'public');
     assert.equal(packageJson.scripts['publish:check'], 'npm test && npm run pack:check');
@@ -101,7 +101,7 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.writePerformed, false);
     assert.equal(plan.executionSupported, true);
     assert.equal(plan.installer.packageName, '@nodics/installer');
-    assert.equal(plan.installer.version, '0.7.0');
+    assert.equal(plan.installer.version, '0.7.1');
     assert.equal(plan.installer.bootstrapCommand, 'npx github:Nodics/nodics.installer');
     assert.equal(plan.beginnerChoices.environmentProfile.code, 'local-dev');
     assert.equal(plan.beginnerChoices.acceptanceProfile.code, 'standard');
@@ -850,7 +850,7 @@ test('start execution rechecks live topology even when evidence has a prior star
     const evidence = JSON.parse(fs.readFileSync(plan.evidencePath, 'utf8'));
     const startSteps = evidence.steps.filter(step => step.code === 'start');
     assert.equal(startSteps.length, 1);
-    assert.equal(startSteps[0].stageVersion, '0.7.0:detached-topology-start-v1');
+    assert.equal(startSteps[0].stageVersion, '0.7.1:detached-topology-start-v1');
     assert.equal(startSteps[0].result.status, 'passed');
 });
 
@@ -1009,7 +1009,7 @@ test('version action exposes supported actions without requiring workspace valid
     const result = installer.versionInfo();
     assert.equal(result.operation, 'local-installer-version');
     assert.equal(result.packageName, '@nodics/installer');
-    assert.equal(result.version, '0.7.0');
+    assert.equal(result.version, '0.7.1');
     assert(result.actions.includes('status'));
     assert(result.actions.includes('repair'));
     assert(result.actions.includes('add-environment'));
@@ -1617,7 +1617,7 @@ test('CLI prints structured JSON', () => {
     const parsed = JSON.parse(output);
     assert.equal(parsed.operation, 'local-setup-plan');
     assert.equal(parsed.installer.packageName, '@nodics/installer');
-    assert.equal(parsed.installer.version, '0.7.0');
+    assert.equal(parsed.installer.version, '0.7.1');
 });
 
 test('text plan warns beginners not to customize vendor-owned repositories', () => {

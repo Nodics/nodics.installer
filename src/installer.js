@@ -19,7 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 const REBRAND_STAGE_VERSION = VERSION + ':project-runtime-identity-v6';
 const START_STAGE_VERSION = VERSION + ':detached-topology-start-v1';
 const VENDOR_BOUNDARY_STAGE_VERSION = VERSION + ':vendor-boundary-v1';
