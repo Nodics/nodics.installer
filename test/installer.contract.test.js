@@ -70,6 +70,19 @@ test('documentation preserves AI tool repository entry path', () => {
     });
 });
 
+test('approved Application Builder scope avoids extra business descriptors', () => {
+    const scope = fs.readFileSync(path.join(repoRoot, 'docs', 'application-builder-scope.md'), 'utf8');
+    const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+    const agents = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8');
+    [scope, readme, agents].forEach(content => {
+        assert.match(content, /nodics\.solution\.json/);
+        assert.match(content, /nodics\.project\.json/);
+        assert.match(content, /Application Builder contract/);
+    });
+    assert.match(scope, /must not introduce a new business solution descriptor/);
+    assert.match(scope, /setup constraints only/);
+});
+
 test('creates an executable beginner local setup plan', () => {
     const plan = installer.createSetupPlan(installer.parseOptions([
         '--workspace=/tmp/nodicsRoot',
@@ -127,6 +140,9 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.installStrategy.lockfileCommand, 'npm ci');
     assert.equal(plan.enterprisePolicy.telemetry, 'Installer evidence records local timings and failure categories only; it does not send telemetry.');
     assert.equal(plan.recovery.cleanupAction, 'cleanup-workspace');
+    assert.equal(plan.recovery.backupAction, 'backup');
+    assert.equal(plan.recovery.rollbackAction, 'rollback');
+    assert.equal(plan.enterprisePolicy.policyPackContract, 'Setup constraint file only; not a business descriptor or builder source of truth.');
     assert.equal(plan.generatedFilePolicy.vendorOwned[0], 'nodics.ai');
     assert.equal(plan.customerCustomizationMap.backendModules, 'acme.startio/modules');
     assert(plan.beginnerNextSteps.some(step => step.includes('Do not change nodics.ai or nodics.axis')));
@@ -321,6 +337,56 @@ test('questionnaire answers merge into normal options', async () => {
     assert.equal(options.release, 'master');
 });
 
+test('policy pack constrains setup choices without becoming a solution descriptor', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-policy-'));
+    const policyPath = path.join(workspace, 'policy.json');
+    installer.writeJsonFile(policyPath, {
+        allowedAccelerators: ['apparel'],
+        allowedModes: ['node'],
+        requiredApps: ['axis'],
+        allowedReleases: ['development'],
+        defaults: {
+            applicationName: 'Policy Acme',
+            accelerator: 'apparel',
+            mode: 'node',
+            workspace
+        }
+    });
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Policy Acme',
+        '--accelerator=apparel',
+        '--policy-pack=' + policyPath
+    ]);
+    const plan = installer.createSetupPlan(options);
+    assert.equal(plan.enterpriseOptions.policyPackStatus, 'passed');
+    assert.match(plan.enterprisePolicy.policyPackContract, /not a business descriptor/);
+
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Policy Acme',
+        '--accelerator=telco',
+        '--policy-pack=' + policyPath
+    ])), /not allowed by policy/);
+
+    const questionnaire = await installer.runQuestionnaire(installer.parseOptions([
+        '--action=questionnaire',
+        '--policy-pack=' + policyPath
+    ]), {
+        journey: 'reference',
+        applicationName: 'Policy Acme',
+        projectName: 'policy-acme.startio',
+        commerceSiteName: 'policy-acme.apparel',
+        companySiteName: 'policy-acme.web',
+        workspace,
+        cloneMode: 'https',
+        release: 'development'
+    });
+    assert.equal(questionnaire.accelerator, 'apparel');
+    assert.equal(questionnaire.mode, 'node');
+    assert.deepEqual(questionnaire.apps, ['axis']);
+});
+
 test('bare interactive startup asks guided questions', () => {
     const options = installer.parseOptions([]);
     assert.equal(installer.shouldRunStartupQuestionnaire([], options, {
@@ -411,6 +477,8 @@ test('execute writes resumable evidence with injected stages', async () => {
     const plan = service.createSetupPlan(options);
     const result = await service.executeSetup(plan, options);
     assert.equal(result.ok, true);
+    assert.equal(result.summary.backendProject, 'evidence-app.startio');
+    assert(result.summary.nextCommands.some(command => command.includes('--action=status')));
     assert(fs.existsSync(plan.evidencePath));
     const evidence = JSON.parse(fs.readFileSync(plan.evidencePath, 'utf8'));
     assert.deepEqual(evidence.steps.map(step => step.code), [
@@ -953,6 +1021,8 @@ test('version action exposes supported actions without requiring workspace valid
     assert(result.actions.includes('self-check'));
     assert(result.actions.includes('cleanup-workspace'));
     assert(result.actions.includes('uninstall'));
+    assert(result.actions.includes('backup'));
+    assert(result.actions.includes('rollback'));
     assert(result.actions.includes('workspace-manifest'));
     assert(result.actions.includes('update-vendors'));
     assert(result.actions.includes('diff-review'));
@@ -962,6 +1032,8 @@ test('version action exposes supported actions without requiring workspace valid
     assert(result.actions.includes('troubleshooting'));
     assert(result.mutatingActions.includes('clean'));
     assert(result.mutatingActions.includes('support-bundle'));
+    assert(result.mutatingActions.includes('backup'));
+    assert(result.mutatingActions.includes('rollback'));
     assert(result.mutatingActions.includes('cleanup-workspace'));
     assert(result.mutatingActions.includes('workspace-manifest'));
     assert(result.mutatingActions.includes('update-vendors'));
@@ -1234,8 +1306,45 @@ test('inventory upgrade-check support-bundle and cleanup use generated metadata 
     assert.equal(support.operation, 'local-support-bundle');
     assert(cleanup.removed.includes(options.application.projectPath));
     assert(cleanup.protectedRoots.includes('nodics.axis'));
+    assert(fs.existsSync(cleanup.backup.manifestPath));
     assert(fs.existsSync(options.application.axisPath));
     assert(!fs.existsSync(options.application.projectPath));
+});
+
+test('backup and rollback restore generated customer roots without touching vendors', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-backup-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--company-site-name=acme.web',
+        '--commerce-site-name=acme.apparel',
+        '--apps=axis',
+        '--action=backup',
+        '--yes'
+    ]);
+    const plan = installer.createSetupPlan(options);
+    fs.mkdirSync(options.application.projectPath, { recursive: true });
+    fs.mkdirSync(options.application.axisPath, { recursive: true });
+    installer.writeJsonFile(path.join(options.application.projectPath, '.nodics-installer-identity.json'), {
+        kind: 'customer-project'
+    });
+    fs.writeFileSync(path.join(options.application.projectPath, 'custom.txt'), 'before\n');
+    fs.writeFileSync(path.join(options.application.axisPath, '.env'), 'vendor should stay\n');
+
+    const backup = installer.createGeneratedBackup(plan, options, 'test');
+    fs.writeFileSync(path.join(options.application.projectPath, 'custom.txt'), 'after\n');
+    options.backupId = backup.id;
+    const rollback = installer.rollbackGeneratedBackup(plan, options);
+
+    assert.equal(backup.operation, 'local-generated-root-backup');
+    assert.equal(backup.entries.length, 1);
+    assert.equal(rollback.operation, 'local-generated-root-rollback');
+    assert.deepEqual(rollback.restored, [options.application.projectPath]);
+    assert.equal(fs.readFileSync(path.join(options.application.projectPath, 'custom.txt'), 'utf8'), 'before\n');
+    assert.equal(fs.readFileSync(path.join(options.application.axisPath, '.env'), 'utf8'), 'vendor should stay\n');
+    assert.match(installer.renderBackup(backup), /Roots: 1/);
+    assert.match(installer.renderRollback(rollback), /Restored: 1/);
 });
 
 test('workspace manifest diff data publishing health and vendor update actions are bounded', () => {
@@ -1259,8 +1368,15 @@ test('workspace manifest diff data publishing health and vendor update actions a
         topology: { environment: 'acmeLocal', stateDirectory: 'envs/acmeLocal/generated/local-topology' },
         acceptance: { localBootstrap: installer.localBootstrapAcceptanceCapabilities(options) }
     });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'package.json'), {
+        scripts: {
+            'acceptance:guided-initialization': 'node ./scripts/init.js',
+            'acceptance:local': 'node ./scripts/acceptance.js'
+        }
+    });
     installer.writeJsonFile(path.join(options.application.projectPath, 'data', 'manifest.json'), { packages: [] });
-    installer.writeJsonFile(path.join(options.application.projectPath, 'modules', 'mediaPack', 'data', 'manifest.json'), {});
+    installer.writeJsonFile(path.join(options.application.projectPath, 'modules', 'mediaPack', 'data', 'manifest.json'), { packages: [] });
+    fs.writeFileSync(path.join(options.application.projectPath, 'data', 'media-reference.json'), '{}\n');
     installer.writeInstallerIdentity(options.application.projectPath, { kind: 'customer-project', applicationName: 'Acme' });
 
     const calls = [];
@@ -1301,8 +1417,12 @@ test('workspace manifest diff data publishing health and vendor update actions a
     assert.equal(diff.operation, 'local-diff-review');
     assert.equal(data.operation, 'local-data-readiness');
     assert.equal(data.ok, true);
+    assert.equal(data.schemaOwnership.status, 'passed');
+    assert.equal(data.idempotency.status, 'passed');
     assert.equal(publishing.operation, 'local-publishing-check');
     assert.equal(publishing.ok, true);
+    assert.equal(publishing.readiness.schemaOwnership.status, 'passed');
+    assert.equal(publishing.readiness.idempotency.status, 'passed');
     assert.equal(health.operation, 'local-runtime-health');
     assert.equal(health.ok, true);
     assert.equal(update.operation, 'local-update-vendors');
@@ -1359,7 +1479,11 @@ test('add-environment copies one requested environment and writes expansion evid
     assert.equal(result.operation, 'local-expansion-add-environment');
     assert.equal(result.environmentName, 'acmeQa');
     assert(fs.existsSync(path.join(options.application.projectPath, 'envs', 'acmeQa')));
+    assert(fs.existsSync(path.join(options.application.projectPath, 'envs', 'acmeQa', 'README.md')));
+    assert(fs.existsSync(path.join(options.application.projectPath, 'envs', 'acmeQa', 'AGENTS.md')));
     assert.match(fs.readFileSync(path.join(options.application.projectPath, 'envs', 'acmeQa', 'platformServer', 'config', 'properties.js'), 'utf8'), /acmeQa/);
+    assert.match(fs.readFileSync(path.join(options.application.projectPath, 'envs', 'acmeQa', 'AGENTS.md'), 'utf8'), /customer-owned local environment/);
+    assert(fs.existsSync(result.backup.manifestPath));
     assert.equal(installer.readJsonFile(path.join(options.application.projectPath, 'envs', 'acmeQa', 'package.json')).index, '1002.10');
     assert.equal(installer.readJsonFile(path.join(options.application.projectPath, 'envs', 'acmeQa', 'platformServer', 'package.json')).index, '1002.11');
     const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
@@ -1396,7 +1520,11 @@ test('add-module creates a module-shaped customer backend module', () => {
     assert(fs.existsSync(path.join(modulePath, 'nodics.js')));
     assert(fs.existsSync(path.join(modulePath, 'README.md')));
     assert(fs.existsSync(path.join(modulePath, 'AGENTS.md')));
+    assert(fs.existsSync(path.join(modulePath, 'llm', 'contracts', 'README.md')));
+    assert(fs.existsSync(path.join(modulePath, 'llm', 'examples', 'README.md')));
+    assert(fs.existsSync(path.join(modulePath, 'test', 'README.md')));
     assert(fs.existsSync(path.join(modulePath, 'config', 'properties.js')));
+    assert(fs.existsSync(result.backup.manifestPath));
     const packageJson = installer.readJsonFile(path.join(modulePath, 'package.json'));
     assert.equal(packageJson.name, 'acmeLoyalty');
     assert.equal(packageJson.index, '3100.14');
@@ -1405,6 +1533,8 @@ test('add-module creates a module-shaped customer backend module', () => {
     assert.equal(packageJson.nodics.displayName, 'Acme Loyalty');
     assert.deepEqual(packageJson.nodics.runtime, { router: false, publish: false, web: false });
     assert.equal(packageJson.nodics.presetSummary, 'General customer capability module.');
+    assert.match(fs.readFileSync(path.join(modulePath, 'llm', 'contracts', 'README.md'), 'utf8'),
+        /wider architecture documentation belongs in Nodics documentation/);
     const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
     assert.deepEqual(descriptor.expansions.modules[0], {
         name: 'acmeLoyalty',
@@ -1457,9 +1587,11 @@ test('add-site creates one requested customer site from template and records top
     assert.equal(result.sitePreset, 'electronics');
     assert.equal(result.frontendPort, 3200);
     assert.equal(result.install.status, 'passed');
+    assert(fs.existsSync(result.backup.manifestPath));
     const sitePath = path.join(workspace, 'acme.electronics');
     assert.equal(installer.readJsonFile(path.join(sitePath, 'package.json')).name, 'acme.electronics');
     assert.match(fs.readFileSync(path.join(sitePath, 'README.md'), 'utf8'), /Acme Electronics/);
+    assert.match(fs.readFileSync(path.join(sitePath, 'AGENTS.md'), 'utf8'), /customer-owned `commerce` site/);
     assert.match(fs.readFileSync(path.join(sitePath, '.env'), 'utf8'), /AGORA_SOLUTION=electronics/);
     const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
     const frontend = descriptor.topology.groups.frontends.find(entry => entry.code === 'acmeElectronicsSite');

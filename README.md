@@ -96,6 +96,17 @@ The current enterprise-safe publication decision is:
 3. publish the package `@nodics/installer` later when the Nodics npm organization, package
    ownership, release signing, and support policy are ready.
 
+## Application Builder Scope
+
+The installer builds local setup from questionnaire answers, command options,
+existing Nodics repository conventions, and installer evidence used for safety
+and support. It must not introduce a separate business solution descriptor.
+
+Do not add `nodics.solution.json`. Do not make `nodics.project.json` the
+Application Builder contract. Existing customer projects may still use
+`nodics.project.json` for their own runtime or topology metadata, but the
+installer scope is governed by [docs/application-builder-scope.md](docs/application-builder-scope.md).
+
 ## Prerequisite Software
 
 The installer can print a plan with only Node.js and npm available, but a proper
@@ -183,6 +194,8 @@ what will happen before the machine is changed.
 | Acceptance | `npx github:Nodics/nodics.installer --action=acceptance --yes` | Starts if needed, then runs local acceptance checks. |
 | Repair | `npx github:Nodics/nodics.installer --action=repair --yes` | Reapplies installer identity and framework links without recloning. |
 | Clean | `npx github:Nodics/nodics.installer --action=clean --yes` | Removes generated runtime files only; refuses while topology is running. |
+| Backup | `npx github:Nodics/nodics.installer --action=backup --yes` | Archives installer-generated customer roots while protecting vendor repositories. |
+| Rollback | `npx github:Nodics/nodics.installer --action=rollback --yes --backup-id=latest` | Restores an installer-generated customer-root backup. |
 | Cleanup workspace | `npx github:Nodics/nodics.installer --action=cleanup-workspace --yes` | Removes installer-created customer roots and setup evidence while protecting vendor repositories. |
 | Uninstall | `npx github:Nodics/nodics.installer --action=uninstall --yes` | Stops topology, then runs safe generated workspace cleanup. |
 | Inventory | `npx github:Nodics/nodics.installer --action=inventory` | Lists Nodics repositories, generated projects, sites, environments, and installer metadata in a workspace. |
@@ -200,8 +213,8 @@ what will happen before the machine is changed.
 
 Mutating actions never run unless `--yes` is present. This includes `execute`,
 `start`, `stop`, `restart`, `initialize`, `acceptance`, `repair`, `clean`,
-`support-bundle`, `cleanup-workspace`, `uninstall`, `workspace-manifest`, and
-`update-vendors`.
+`support-bundle`, `backup`, `rollback`, `cleanup-workspace`, `uninstall`,
+`workspace-manifest`, and `update-vendors`.
 
 ## Enterprise Options
 
@@ -213,6 +226,7 @@ The installer records enterprise setup choices in the plan and evidence:
 - `--resume`, `--retry-failed`, and `--from-step=<step-code>`
 - `--alternate-ports`
 - `--output=/path/setup-plan.json`
+- `--backup-id=latest`
 - `--fix` with `--action=doctor --yes` for safe installer metadata repair
 - `--explain` with logs and beginner reports
 - `--module-preset=capability|data-pack|integration-adapter|api-facade|workflow-extension`
@@ -223,6 +237,9 @@ The installer records enterprise setup choices in the plan and evidence:
 `stable` maps to `master` when `--release` is not supplied. Explicit
 `--release=<branch-or-tag>` always wins. The npm package identity and bootstrap
 commands remain review-only until a release owner approves npm publication.
+
+Policy packs constrain setup choices such as allowed accelerators, modes,
+required apps, and release values. They are not business solution descriptors.
 
 Maintainers can validate the GitHub bootstrap path without changing npm package
 identity:

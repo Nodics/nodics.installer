@@ -41,6 +41,12 @@ local installer metadata. Use `--action=update-vendors --yes` only for clean
 `nodics.ai` and `nodics.axis` checkouts. Never place customer-specific fixes in
 vendor-owned repositories as a shortcut.
 
+Application Builder scope is recorded in `docs/application-builder-scope.md`.
+Do not introduce `nodics.solution.json` and do not make `nodics.project.json`
+the Application Builder contract. Existing project runtime metadata can be read
+where the generated project already owns it, but setup authority comes from
+user answers/options, existing Nodics conventions, and installer evidence.
+
 ## npm and npx change governance
 
 `npx` and npm package identity are governed bootstrap contracts.
@@ -80,7 +86,7 @@ manageable.
 - Never reset, overwrite, or delete a dirty existing checkout automatically.
 - Never add partner/customer customizations under `nodics.ai` or `nodics.axis`.
 - Never print secret values into normal logs or setup summaries.
-- Roll back only paths created by the current installer operation.
+- Back up and roll back only installer-generated customer roots.
 - Keep beginner text plain; hide raw Nodics module names until evidence or
   advanced sections require them.
 - Prefer `data-readiness`, `publishing-check`, `health`, `logs --explain`, and

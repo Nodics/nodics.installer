@@ -101,9 +101,15 @@ Recovery controls:
 - `--resume` records operator intent to continue from existing evidence;
 - `--retry-failed` removes failed evidence steps before execution;
 - `--from-step=<step-code>` removes that step and later steps before execution;
+- `backup --yes` archives installer-generated customer roots only;
+- `rollback --yes --backup-id=latest` restores a selected generated-root backup
+  while protecting `nodics.ai` and `nodics.axis`;
 - `cleanup-workspace` removes only installer-created customer roots and setup
   evidence, while protecting `nodics.ai` and `nodics.axis`;
 - `uninstall` stops topology first, then runs the same safe cleanup policy.
+
+Backups are retained under `<workspace>/.nodics-installer/backups` so cleanup
+can preserve rollback evidence.
 
 ## Enterprise Command Surface
 
@@ -115,6 +121,8 @@ The installer exposes these enterprise inspection and support actions:
   `acceptance.localBootstrap` with current installer expectations;
 - `support-bundle --yes` writes sanitized evidence, status, and log excerpts,
   writes a SHA-256 manifest, then attempts to create a `.tar.gz` archive;
+- `backup --yes` and `rollback --yes` protect generated customer roots before
+  destructive maintenance;
 - `self-check` validates installer files, local command readiness, JSON result
   contracts, and npm/npx readiness without changing package identity;
 - `workspace-manifest --yes` writes `.nodics-workspace.json` with generated
@@ -147,6 +155,7 @@ Plans and evidence now include:
 - database lifecycle policy for retained data versus fresh data;
 - generated/customer/vendor file ownership policy;
 - data seed, publishing, media, and runtime health readiness summaries.
+- schema ownership and seed idempotency readiness summaries;
 - OS dependency guidance for macOS, Linux, and Windows/WSL;
 - workspace conflict detection for existing folders, dirty repositories,
   missing remotes, and unexpected branches;
@@ -192,6 +201,13 @@ install dependencies, change source code, or patch `nodics.ai` / `nodics.axis`.
 
 Use `--output=/path/setup-plan.json` with `--action=plan --json` when an
 enterprise team wants to review a setup report before any mutating action.
+
+Policy packs constrain installer setup choices only. They are not business
+solution descriptors and they must not become another source of runtime truth.
+
+The approved Application Builder scope is tracked in
+`docs/application-builder-scope.md`: do not add `nodics.solution.json`, and do
+not make `nodics.project.json` the Application Builder contract.
 
 ## Beginner Failure Catalog
 

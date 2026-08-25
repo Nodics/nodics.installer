@@ -31,13 +31,13 @@ const VALID_ACTIONS = new Set([
     'plan', 'questionnaire', 'preflight', 'doctor', 'execute', 'status', 'start', 'stop', 'restart', 'logs',
     'initialize', 'acceptance', 'repair', 'clean', 'add-environment', 'add-module', 'add-site',
     'inventory', 'support-bundle', 'upgrade-check', 'self-check', 'cleanup-workspace',
-    'uninstall', 'update-vendors', 'diff-review', 'data-readiness', 'publishing-check', 'health',
+    'uninstall', 'backup', 'rollback', 'update-vendors', 'diff-review', 'data-readiness', 'publishing-check', 'health',
     'workspace-manifest', 'troubleshooting', 'version'
 ]);
 const MUTATING_ACTIONS = new Set([
     'execute', 'start', 'stop', 'restart', 'initialize', 'acceptance', 'repair', 'clean',
     'add-environment', 'add-module', 'add-site', 'support-bundle', 'cleanup-workspace', 'uninstall',
-    'update-vendors', 'workspace-manifest'
+    'backup', 'rollback', 'update-vendors', 'workspace-manifest'
 ]);
 const VALID_EXECUTION_LEVELS = new Set(['download', 'install', 'preflight', 'start', 'initialize', 'acceptance']);
 const VALID_CLONE_MODES = new Set(['https', 'ssh', 'existing']);
@@ -104,7 +104,9 @@ const JSON_RESULT_CONTRACTS = Object.freeze({
     dataReadiness: 1,
     publishingCheck: 1,
     health: 1,
-    workspaceManifest: 1
+    workspaceManifest: 1,
+    backup: 1,
+    rollback: 1
 });
 
 const DEFAULT_REPOSITORIES = Object.freeze({
@@ -396,6 +398,8 @@ const installer = {
             '  --action=cleanup-workspace --yes',
             '                             Remove only installer-created generated workspace roots.',
             '  --action=uninstall --yes   Stop topology and remove installer-created roots.',
+            '  --action=backup --yes      Archive generated customer-owned roots before mutation.',
+            '  --action=rollback --yes    Restore a generated-root backup by id or latest.',
             '  --action=inventory        List Nodics projects/sites/environments in a workspace.',
             '  --action=support-bundle --yes',
             '                             Export sanitized setup evidence and log excerpts.',
@@ -446,6 +450,7 @@ const installer = {
             '  --alternate-ports                  Preview alternate local port guidance.',
             '  --support-bundle=/path/bundle      Custom sanitized support bundle path.',
             '  --output=/path/setup-plan.json     Write structured result JSON to a file.',
+            '  --backup-id=latest                 Backup id for rollback. Default: latest.',
             '  --fix                              Allow doctor safe local metadata fixes with --yes.',
             '  --explain                          Add beginner explanations to logs and reports.',
             '  --proxy=http://host:port          Record enterprise proxy requirement.',
@@ -543,6 +548,7 @@ const installer = {
             alternatePorts: this.hasFlag(args, '--alternate-ports'),
             supportBundlePath: this.readOption(args, '--support-bundle', ''),
             outputPath: this.readOption(args, '--output', ''),
+            backupId: this.readOption(args, '--backup-id', 'latest'),
             fix: this.hasFlag(args, '--fix'),
             explain: this.hasFlag(args, '--explain'),
             start: this.hasFlag(args, '--start') || action === 'start',
@@ -576,23 +582,69 @@ const installer = {
         return options;
     },
 
-    getQuestionnaireFields: function () {
+    getQuestionnaireFields: function (policy) {
+        const restrictedAccelerators = policy && Array.isArray(policy.allowedAccelerators) ?
+            policy.allowedAccelerators.filter(accelerator => VALID_ACCELERATORS.has(accelerator)) : [];
+        const restrictedModes = policy && Array.isArray(policy.allowedModes) ?
+            policy.allowedModes.filter(mode => VALID_MODES.has(mode)) : [];
+        const restrictedApps = policy && Array.isArray(policy.requiredApps) ?
+            policy.requiredApps.filter(app => VALID_APPS.has(app)) : [];
         return [
-            { name: 'journey', question: 'Setup style (reference/project)', defaultValue: 'reference' },
-            { name: 'applicationName', question: 'Application name', defaultValue: 'My Nodics App' },
-            { name: 'accelerator', question: 'Accelerator (common/apparel/electronics/telco/combined)', defaultValue: 'common' },
-            { name: 'commerceSiteName', question: 'Commerce/apparel site name', defaultValue: answers => this.defaultCommerceSiteName(answers.applicationName || 'My Nodics App', answers.accelerator || 'common') },
-            { name: 'companySiteName', question: 'Company site name', defaultValue: answers => this.defaultCompanySiteName(answers.applicationName || 'My Nodics App') },
+            {
+                name: 'journey',
+                question: 'Setup style. Use reference for first local setup; project is future scope (reference/project)',
+                defaultValue: 'reference'
+            },
+            {
+                name: 'applicationName',
+                question: 'Customer application name. This becomes the visible local identity',
+                defaultValue: policy && policy.defaults && policy.defaults.applicationName || 'My Nodics App'
+            },
+            {
+                name: 'accelerator',
+                question: 'Business starter to run locally (' + (restrictedAccelerators.length ?
+                    restrictedAccelerators.join('/') : 'common/apparel/electronics/telco/combined') + ')',
+                defaultValue: restrictedAccelerators[0] || policy && policy.defaults && policy.defaults.accelerator || 'common',
+                fixed: restrictedAccelerators.length === 1
+            },
+            {
+                name: 'commerceSiteName',
+                question: 'Commerce site folder, for example acme.apparel',
+                defaultValue: answers => this.defaultCommerceSiteName(answers.applicationName || 'My Nodics App', answers.accelerator || 'common')
+            },
+            {
+                name: 'companySiteName',
+                question: 'Company site folder, for example acme.web',
+                defaultValue: answers => this.defaultCompanySiteName(answers.applicationName || 'My Nodics App')
+            },
             {
                 name: 'projectName',
-                question: 'Backend project code/folder',
+                question: 'Backend project folder, for example acme.startio',
                 defaultValue: answers => this.defaultProjectName(answers.applicationName || 'My Nodics App')
             },
-            { name: 'workspace', question: 'Workspace folder', defaultValue: path.join(os.homedir(), 'Nodics', 'nodicsRoot') },
-            { name: 'mode', question: 'Runtime mode (node/docker)', defaultValue: 'node' },
-            { name: 'apps', question: 'Standard applications (axis)', defaultValue: 'axis' },
-            { name: 'cloneMode', question: 'Repository access (https/ssh/existing)', defaultValue: 'https' },
-            { name: 'release', question: 'Branch or tag', defaultValue: 'development' }
+            {
+                name: 'workspace',
+                question: 'Workspace folder where Nodics repos and generated customer roots will live',
+                defaultValue: policy && policy.defaults && policy.defaults.workspace || path.join(os.homedir(), 'Nodics', 'nodicsRoot')
+            },
+            {
+                name: 'mode',
+                question: 'Runtime mode (' + (restrictedModes.length ? restrictedModes.join('/') : 'node/docker') + ')',
+                defaultValue: restrictedModes[0] || policy && policy.defaults && policy.defaults.mode || 'node',
+                fixed: restrictedModes.length === 1
+            },
+            {
+                name: 'apps',
+                question: 'Standard applications to include. Usually axis',
+                defaultValue: restrictedApps.length ? restrictedApps.join(',') : 'axis',
+                fixed: restrictedApps.length === 1
+            },
+            { name: 'cloneMode', question: 'Repository access method (https/ssh/existing)', defaultValue: 'https' },
+            {
+                name: 'release',
+                question: 'Nodics branch or tag. Use development for active local work',
+                defaultValue: policy && policy.defaults && policy.defaults.release || 'development'
+            }
         ];
     },
 
@@ -627,6 +679,9 @@ const installer = {
         if (scriptedAnswers && Object.prototype.hasOwnProperty.call(scriptedAnswers, field.name)) {
             return scriptedAnswers[field.name] || defaultValue;
         }
+        if (field.fixed) {
+            return defaultValue;
+        }
         return new Promise(resolve => {
             reader.question(field.question + ' [' + defaultValue + ']: ', answer => {
                 resolve((answer || defaultValue).trim());
@@ -635,7 +690,8 @@ const installer = {
     },
 
     runQuestionnaire: async function (baseOptions, scriptedAnswers) {
-        const fields = this.getQuestionnaireFields();
+        const policy = this.readPolicyPack(baseOptions).policy;
+        const fields = this.getQuestionnaireFields(policy);
         const reader = readline.createInterface({ input: process.stdin, output: process.stdout });
         const args = [];
         const answers = {};
@@ -727,7 +783,7 @@ const installer = {
             errors.push('Unknown accelerator `' + options.accelerator + '`. Use common, apparel, electronics, telco, or combined.');
         }
         if (!VALID_ACTIONS.has(options.action)) {
-            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, cleanup-workspace, uninstall, update-vendors, inventory, workspace-manifest, support-bundle, upgrade-check, diff-review, data-readiness, publishing-check, health, self-check, add-environment, add-module, add-site, troubleshooting, or version.');
+            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, backup, rollback, cleanup-workspace, uninstall, update-vendors, inventory, workspace-manifest, support-bundle, upgrade-check, diff-review, data-readiness, publishing-check, health, self-check, add-environment, add-module, add-site, troubleshooting, or version.');
         }
         if (!VALID_EXECUTION_LEVELS.has(options.executionLevel)) {
             errors.push('Unknown execution level `' + options.executionLevel + '`.');
@@ -788,6 +844,13 @@ const installer = {
         }
         if (options.workspace === path.parse(options.workspace).root || options.workspace === os.homedir()) {
             errors.push('Workspace must be a dedicated folder, not the filesystem root or home directory.');
+        }
+        const policyStatus = this.policyPackStatus(options);
+        if (policyStatus.status === 'failed') {
+            if (policyStatus.error) {
+                errors.push(policyStatus.error);
+            }
+            (policyStatus.findings || []).forEach(finding => errors.push(finding));
         }
         return { valid: errors.length === 0, errors };
     },
@@ -885,30 +948,172 @@ const installer = {
         };
     },
 
+    readPolicyPack: function (options) {
+        if (!options.policyPack) {
+            return { status: 'skipped', policy: null };
+        }
+        if (!fs.existsSync(options.policyPack)) {
+            return {
+                status: 'failed',
+                policy: null,
+                error: 'Policy pack path does not exist.'
+            };
+        }
+        try {
+            return {
+                status: 'passed',
+                policy: this.readJsonFile(options.policyPack)
+            };
+        } catch (error) {
+            return {
+                status: 'failed',
+                policy: null,
+                error: 'Policy pack must be valid JSON: ' + error.message
+            };
+        }
+    },
+
+    policyPackStatus: function (options) {
+        const loaded = this.readPolicyPack(options);
+        if (loaded.status !== 'passed') {
+            return loaded;
+        }
+        const policy = loaded.policy || {};
+        const findings = [];
+        const allowedAccelerators = Array.isArray(policy.allowedAccelerators) ? policy.allowedAccelerators : [];
+        const allowedModes = Array.isArray(policy.allowedModes) ? policy.allowedModes : [];
+        const requiredApps = Array.isArray(policy.requiredApps) ? policy.requiredApps : [];
+        const allowedReleases = Array.isArray(policy.allowedReleases) ? policy.allowedReleases : [];
+        allowedAccelerators.filter(accelerator => !VALID_ACCELERATORS.has(accelerator))
+            .forEach(accelerator => findings.push('Unknown policy accelerator: ' + accelerator));
+        allowedModes.filter(mode => !VALID_MODES.has(mode))
+            .forEach(mode => findings.push('Unknown policy mode: ' + mode));
+        requiredApps.filter(app => !VALID_APPS.has(app))
+            .forEach(app => findings.push('Unknown policy app: ' + app));
+        if (allowedAccelerators.length && !allowedAccelerators.includes(options.accelerator)) {
+            findings.push('Selected accelerator `' + options.accelerator + '` is not allowed by policy.');
+        }
+        if (allowedModes.length && !allowedModes.includes(options.mode)) {
+            findings.push('Selected mode `' + options.mode + '` is not allowed by policy.');
+        }
+        requiredApps.filter(app => !options.apps.includes(app))
+            .forEach(app => findings.push('Required app `' + app + '` is missing.'));
+        if (allowedReleases.length && !allowedReleases.includes(options.release)) {
+            findings.push('Selected release `' + options.release + '` is not allowed by policy.');
+        }
+        if (policy.requireCompanySite === true && !options.companySite) {
+            findings.push('Policy requires a company site.');
+        }
+        if (policy.requireCommerceSite === true && !options.commerceSite) {
+            findings.push('Policy requires a commerce site.');
+        }
+        return {
+            status: findings.length ? 'failed' : 'passed',
+            policy,
+            findings,
+            note: 'Policy packs constrain installer choices; they are not customer business solution descriptors.'
+        };
+    },
+
     dataSeedReadiness: function (options) {
         const manifestPath = path.join(options.application.projectPath, 'data', 'manifest.json');
+        const moduleRoot = path.join(options.application.projectPath, 'modules');
+        const moduleManifestFiles = fs.existsSync(moduleRoot) ?
+            this.collectFiles(moduleRoot,
+                filePath => path.basename(filePath) === 'manifest.json' && filePath.includes(path.sep + 'data' + path.sep), 100) : [];
         const moduleManifestCount = fs.existsSync(path.join(options.application.projectPath, 'modules')) ?
             this.collectFiles(path.join(options.application.projectPath, 'modules'),
                 filePath => path.basename(filePath) === 'manifest.json' && filePath.includes(path.sep + 'data' + path.sep), 50).length : 0;
+        const manifests = [manifestPath, ...moduleManifestFiles]
+            .filter(filePath => fs.existsSync(filePath))
+            .map(filePath => this.validateDataManifest(filePath, options));
+        const invalid = manifests.filter(manifest => manifest.status !== 'passed');
         return {
-            status: fs.existsSync(manifestPath) || moduleManifestCount > 0 ? 'passed' : 'warning',
+            status: invalid.length ? 'warning' :
+                (fs.existsSync(manifestPath) || moduleManifestCount > 0 ? 'passed' : 'warning'),
             rootManifest: fs.existsSync(manifestPath) ? manifestPath : undefined,
             moduleManifestCount,
-            fix: fs.existsSync(manifestPath) || moduleManifestCount > 0 ? undefined :
+            manifests,
+            fix: invalid.length ? 'Fix invalid JSON or missing manifest structure before initialization.' :
+                (fs.existsSync(manifestPath) || moduleManifestCount > 0 ? undefined :
                 'Confirm starter data manifests before initialization, especially for selected accelerator data packs.'
+                )
+        };
+    },
+
+    validateDataManifest: function (manifestPath, options) {
+        try {
+            const manifest = this.readJsonFile(manifestPath);
+            const content = JSON.stringify(manifest);
+            return {
+                path: path.relative(options.application.projectPath, manifestPath),
+                status: Array.isArray(manifest.data) || Array.isArray(manifest.packages) ||
+                    Array.isArray(manifest.headers) || content.length > 2 ? 'passed' : 'warning',
+                packages: Array.isArray(manifest.packages) ? manifest.packages.length : undefined,
+                data: Array.isArray(manifest.data) ? manifest.data.length : undefined
+            };
+        } catch (error) {
+            return {
+                path: path.relative(options.application.projectPath, manifestPath),
+                status: 'failed',
+                error: error.message
+            };
+        }
+    },
+
+    schemaOwnershipReadiness: function (options) {
+        const moduleRoot = path.join(options.application.projectPath, 'modules');
+        const schemaFiles = fs.existsSync(moduleRoot) ?
+            this.collectFiles(moduleRoot, filePath => /schema|model/i.test(path.basename(filePath)) &&
+                /\.(js|json|mjs)$/.test(filePath), 100) : [];
+        const frameworkOwnedNamePattern = /nodics[A-Z]|default[A-Z].*(Schema|Model)/;
+        const warnings = schemaFiles
+            .map(filePath => path.relative(options.application.projectPath, filePath))
+            .filter(relativePath => frameworkOwnedNamePattern.test(relativePath));
+        return {
+            status: warnings.length ? 'warning' : 'passed',
+            checkedFiles: schemaFiles.length,
+            warnings,
+            fix: warnings.length ? 'Review schema/model files and avoid redefining framework-owned contracts in customer modules.' : undefined
+        };
+    },
+
+    idempotencyReadiness: function (options) {
+        const packagePath = path.join(options.application.projectPath, 'package.json');
+        if (!fs.existsSync(packagePath)) {
+            return {
+                status: 'warning',
+                fix: 'Project package.json is required before idempotency checks.'
+            };
+        }
+        const packageJson = this.readJsonFile(packagePath);
+        const scripts = packageJson.scripts || {};
+        const expected = ['acceptance:guided-initialization', 'acceptance:local'];
+        const missing = expected.filter(script => !scripts[script]);
+        return {
+            status: missing.length ? 'warning' : 'passed',
+            missingScripts: missing,
+            checkedScripts: expected,
+            fix: missing.length ? 'Expose repeatable initialization and local acceptance scripts in package.json.' : undefined
         };
     },
 
     publishingReadiness: function (options) {
+        const schema = this.schemaOwnershipReadiness(options);
+        const idempotency = this.idempotencyReadiness(options);
         return {
-            status: 'planned',
+            status: schema.status === 'passed' && idempotency.status === 'passed' ? 'passed' : 'warning',
             checks: [
                 'mandatory approval workflow',
                 'content catalogs',
                 'media providers',
                 'staged and online runtimes',
-                'cross-enterprise rejection gates'
+                'cross-enterprise rejection gates',
+                'schema ownership',
+                'seed idempotency'
             ],
+            schemaOwnership: schema,
+            idempotency,
             command: options.mode === 'docker' ? 'npm run docker-local:acceptance' : 'npm run acceptance:local'
         };
     },
@@ -1326,6 +1531,7 @@ const installer = {
                 npmRegistry: options.npmRegistry || undefined,
                 offlineCache: options.offlineCache || undefined,
                 policyPack: options.policyPack || undefined,
+                policyPackStatus: this.policyPackStatus(options).status,
                 evidenceRequired: true,
                 secretsPrinted: false
             },
@@ -1355,6 +1561,7 @@ const installer = {
                 npmRegistry: options.npmRegistry || undefined,
                 remoteNpxSmokeCommand: 'npm run smoke:remote -- --workspace=/tmp/nodics-remote-smoke',
                 policyPack: options.policyPack || undefined,
+                policyPackContract: 'Setup constraint file only; not a business descriptor or builder source of truth.',
                 privacy: 'Console output, evidence, and support bundles must redact tokens, bearer headers, passwords, and secrets.',
                 telemetry: 'Installer evidence records local timings and failure categories only; it does not send telemetry.'
             },
@@ -1363,7 +1570,9 @@ const installer = {
                 retryFailed: options.retryFailed,
                 fromStep: options.fromStep || undefined,
                 cleanupAction: 'cleanup-workspace',
-                supportBundleAction: 'support-bundle'
+                supportBundleAction: 'support-bundle',
+                backupAction: 'backup',
+                rollbackAction: 'rollback'
             },
             customerCustomizationMap: this.customerCustomizationMap(options),
             generatedFilePolicy: {
@@ -1410,6 +1619,7 @@ const installer = {
                 'Start the selected backend and frontend topology when requested by execution level.',
                 'Run guided initialization when sample or accelerator data is selected.',
                 'Write .nodics-workspace.json so support, upgrades, and AI tools can identify generated roots.',
+                'Create generated-root backups before destructive workspace cleanup or rollback.',
                 'Write setup evidence without secret values.'
             ],
             commands: options.mode === 'docker' ? this.dockerCommands(options) : this.nodeCommands(options),
@@ -1631,6 +1841,88 @@ const installer = {
         };
     },
 
+    serviceCommandCheck: function (code, executable, args, fix) {
+        const result = this.runCommand(executable, args, { cwd: process.cwd(), allowFailure: true });
+        return {
+            code,
+            required: false,
+            status: result.status === 'passed' ? 'passed' : 'warning',
+            version: result.stdout.trim() || result.stderr.trim(),
+            fix: result.status === 'passed' ? undefined : fix
+        };
+    },
+
+    platformDependencyChecks: function () {
+        if (process.platform === 'darwin') {
+            return [
+                this.serviceCommandCheck('brew-services', 'brew', ['services', 'list'],
+                    'Install Homebrew or start MongoDB, Redis, and Elasticsearch manually.'),
+                this.serviceCommandCheck('docker-desktop', 'docker', ['info', '--format', '{{.ServerVersion}}'],
+                    'Start Docker Desktop when Docker Local or dependency containers are selected.')
+            ];
+        }
+        if (process.platform === 'linux') {
+            return ['mongod', 'redis-server', 'elasticsearch'].map(service =>
+                this.serviceCommandCheck('systemd-' + service, 'systemctl', ['is-active', service],
+                    'Use systemctl or a containerized dependency bundle to start ' + service + '.'));
+        }
+        if (process.platform === 'win32') {
+            return [
+                {
+                    code: 'windows-path-length',
+                    required: false,
+                    status: process.cwd().length < 180 ? 'passed' : 'warning',
+                    path: process.cwd(),
+                    fix: 'Use a shorter workspace path or WSL to avoid Windows path length issues.'
+                },
+                {
+                    code: 'windows-wsl-guidance',
+                    required: false,
+                    status: 'warning',
+                    fix: 'WSL is recommended for MongoDB, Redis, Elasticsearch, and shell-compatible local setup.'
+                }
+            ];
+        }
+        return [];
+    },
+
+    enterpriseNetworkChecks: function (options) {
+        const checks = [];
+        if (options.proxy) {
+            checks.push({
+                code: 'corporate-proxy',
+                required: false,
+                status: /^https?:\/\//.test(options.proxy) ? 'passed' : 'warning',
+                proxy: this.sanitizeOutput(options.proxy),
+                fix: /^https?:\/\//.test(options.proxy) ? undefined : 'Use an http:// or https:// proxy URL.'
+            });
+        }
+        if (options.npmRegistry) {
+            const result = this.runCommand('npm', ['ping', '--registry', options.npmRegistry], {
+                cwd: process.cwd(),
+                allowFailure: true
+            });
+            checks.push({
+                code: 'npm-registry',
+                required: false,
+                status: result.status === 'passed' ? 'passed' : 'warning',
+                fix: result.status === 'passed' ? undefined :
+                    'Check registry URL, proxy, and corporate CA configuration.'
+            });
+        }
+        if (options.offlineCache) {
+            checks.push({
+                code: 'offline-cache',
+                required: false,
+                status: fs.existsSync(options.offlineCache) ? 'passed' : 'warning',
+                path: options.offlineCache,
+                fix: fs.existsSync(options.offlineCache) ? undefined :
+                    'Provide a readable offline cache folder before disconnected setup.'
+            });
+        }
+        return checks;
+    },
+
     diskSpaceCheck: function (targetPath) {
         const root = fs.existsSync(targetPath) ? targetPath : path.dirname(targetPath);
         const result = this.runCommand('df', ['-k', root], { cwd: process.cwd(), allowFailure: true });
@@ -1694,6 +1986,7 @@ const installer = {
                     'Install Homebrew from https://brew.sh, then use brew install node git redis mongodb-community where appropriate.'
             });
         }
+        checks.push(...this.platformDependencyChecks());
         return checks;
     },
 
@@ -1809,6 +2102,7 @@ const installer = {
     },
 
     policyPackCheck: function (options) {
+        const status = this.policyPackStatus(options);
         if (!options.policyPack) {
             return {
                 code: 'enterprise-policy-pack',
@@ -1820,9 +2114,10 @@ const installer = {
         return {
             code: 'enterprise-policy-pack',
             required: true,
-            status: fs.existsSync(options.policyPack) ? 'passed' : 'failed',
+            status: status.status,
             path: options.policyPack,
-            fix: fs.existsSync(options.policyPack) ? undefined : 'Provide a readable enterprise policy pack path.'
+            findings: status.findings,
+            fix: status.status === 'passed' ? undefined : 'Fix the policy pack or choose options allowed by the policy pack.'
         };
     },
 
@@ -1942,6 +2237,7 @@ const installer = {
             fix: conflict.fix
         })));
         checks.push(...this.frontendEnvironmentChecks(options));
+        checks.push(...this.enterpriseNetworkChecks(options));
         checks.push(this.policyPackCheck(options));
         const ports = Object.values(plan.expectedUrls)
             .filter(Boolean)
@@ -3087,6 +3383,151 @@ const installer = {
         return [targetPath];
     },
 
+    copyDirectoryForBackup: function (sourcePath, targetPath) {
+        fs.cpSync(sourcePath, targetPath, {
+            recursive: true,
+            filter: source => {
+                const name = path.basename(source);
+                return name !== 'node_modules' && name !== 'generated' && name !== 'temp';
+            }
+        });
+        return targetPath;
+    },
+
+    assertPathInsideWorkspace: function (workspace, targetPath) {
+        const resolvedWorkspace = path.resolve(workspace);
+        const resolvedTarget = path.resolve(targetPath);
+        if (resolvedTarget === resolvedWorkspace || !resolvedTarget.startsWith(resolvedWorkspace + path.sep)) {
+            throw new Error('Refusing to operate outside workspace: ' + targetPath);
+        }
+        return resolvedTarget;
+    },
+
+    isGeneratedCustomerRoot: function (rootPath) {
+        if (!fs.existsSync(rootPath)) {
+            return false;
+        }
+        return fs.existsSync(path.join(rootPath, '.nodics-installer-identity.json')) ||
+            fs.existsSync(path.join(rootPath, '.nodics-installer-lock.json'));
+    },
+
+    generatedCustomerRoots: function (plan, options) {
+        const protectedRoots = new Set(VENDOR_OWNED_REPOSITORIES);
+        return plan.repositories
+            .filter(repository => !protectedRoots.has(repository.name))
+            .map(repository => ({
+                name: repository.name,
+                code: repository.code,
+                path: this.assertPathInsideWorkspace(options.workspace, repository.targetPath)
+            }))
+            .filter(repository => this.isGeneratedCustomerRoot(repository.path));
+    },
+
+    backupDirectory: function (options) {
+        return path.join(options.workspace, '.nodics-installer', 'backups');
+    },
+
+    backupId: function () {
+        return new Date().toISOString().replace(/[:.]/g, '-');
+    },
+
+    backupManifestPath: function (backupPath) {
+        return path.join(backupPath, 'manifest.json');
+    },
+
+    createGeneratedBackup: function (plan, options, reason) {
+        const backupRoot = this.backupDirectory(options);
+        const id = this.backupId();
+        const backupPath = path.join(backupRoot, id);
+        const roots = this.generatedCustomerRoots(plan, options);
+        fs.mkdirSync(backupPath, { recursive: true });
+        const entries = roots.map(root => {
+            const archivePath = path.join(backupPath, root.name);
+            this.copyDirectoryForBackup(root.path, archivePath);
+            return {
+                name: root.name,
+                code: root.code,
+                targetPath: root.path,
+                archivePath,
+                relativeArchivePath: path.relative(backupPath, archivePath)
+            };
+        });
+        const manifest = {
+            contractVersion: JSON_RESULT_CONTRACTS.backup,
+            operation: 'local-generated-root-backup',
+            ok: true,
+            id,
+            reason: reason || 'manual',
+            createdAt: new Date().toISOString(),
+            workspace: options.workspace,
+            entries,
+            protectedVendorRoots: VENDOR_OWNED_REPOSITORIES,
+            rule: 'Backups include only installer-generated customer roots and exclude node_modules/generated/temp.'
+        };
+        this.writeJsonFile(this.backupManifestPath(backupPath), manifest);
+        return {
+            ...manifest,
+            backupPath,
+            manifestPath: this.backupManifestPath(backupPath)
+        };
+    },
+
+    latestBackupPath: function (options) {
+        const root = this.backupDirectory(options);
+        if (!fs.existsSync(root)) {
+            return null;
+        }
+        const candidates = fs.readdirSync(root, { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .map(entry => path.join(root, entry.name))
+            .filter(candidate => fs.existsSync(this.backupManifestPath(candidate)))
+            .sort();
+        return candidates.length ? candidates[candidates.length - 1] : null;
+    },
+
+    resolveBackupPath: function (options) {
+        if (options.backupId === 'latest') {
+            return this.latestBackupPath(options);
+        }
+        return path.join(this.backupDirectory(options), options.backupId);
+    },
+
+    rollbackGeneratedBackup: function (plan, options) {
+        const backupPath = this.resolveBackupPath(options);
+        if (!backupPath || !fs.existsSync(this.backupManifestPath(backupPath))) {
+            throw new Error('No generated-root backup found for id: ' + options.backupId);
+        }
+        const manifest = this.readJsonFile(this.backupManifestPath(backupPath));
+        const restored = [];
+        (manifest.entries || []).forEach(entry => {
+            if (VENDOR_OWNED_REPOSITORIES.includes(entry.name)) {
+                throw new Error('Backup contains vendor-owned root and cannot be rolled back: ' + entry.name);
+            }
+            const targetPath = this.assertPathInsideWorkspace(options.workspace, entry.targetPath);
+            const archivePath = path.join(backupPath, entry.relativeArchivePath || entry.name);
+            if (!fs.existsSync(archivePath)) {
+                throw new Error('Backup entry archive is missing: ' + archivePath);
+            }
+            if (fs.existsSync(targetPath) && !this.isGeneratedCustomerRoot(targetPath)) {
+                throw new Error('Refusing to replace a non-installer-generated root: ' + targetPath);
+            }
+            fs.rmSync(targetPath, { recursive: true, force: true });
+            fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+            this.copyDirectoryForBackup(archivePath, targetPath);
+            restored.push(targetPath);
+        });
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.rollback,
+            operation: 'local-generated-root-rollback',
+            ok: true,
+            backupId: manifest.id,
+            backupPath,
+            restored,
+            protectedVendorRoots: VENDOR_OWNED_REPOSITORIES,
+            rule: 'Rollback restores installer-generated customer roots only.'
+        };
+    },
+
     collectPackageJsonFiles: function (rootPath) {
         const files = [];
         const visit = currentPath => {
@@ -3165,9 +3606,114 @@ const installer = {
         });
     },
 
+    writeExpansionReadmeIfMissing: function (filePath, lines) {
+        if (fs.existsSync(filePath)) {
+            return [];
+        }
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, lines.join('\n') + '\n');
+        return [filePath];
+    },
+
+    modulePresetScaffold: function (modulePath, options, preset) {
+        const changed = [];
+        [
+            ['llm', 'contracts'],
+            ['llm', 'examples'],
+            ['test']
+        ].forEach(parts => {
+            const directory = path.join(modulePath, ...parts);
+            fs.mkdirSync(directory, { recursive: true });
+            changed.push(...this.writeExpansionReadmeIfMissing(path.join(directory, 'README.md'), [
+                '# ' + options.moduleName + ' ' + parts.join('/'),
+                '',
+                'Local module-level notes for ' + options.application.name + '.',
+                'Keep these notes scoped to this module; wider architecture documentation belongs in Nodics documentation.'
+            ]));
+        });
+        if (options.modulePreset === 'data-pack') {
+            const dataPath = path.join(modulePath, 'data');
+            fs.mkdirSync(path.join(dataPath, 'init'), { recursive: true });
+            this.writeJsonFile(path.join(dataPath, 'manifest.json'), {
+                module: options.moduleName,
+                owner: options.application.projectName,
+                packages: [],
+                note: 'Add customer-owned data packages here. Do not redefine framework seed contracts.'
+            });
+            changed.push(path.join(dataPath, 'manifest.json'));
+            changed.push(...this.writeExpansionReadmeIfMissing(path.join(dataPath, 'init', 'README.md'), [
+                '# Initial Data',
+                '',
+                'Place customer-owned initial data files for this module here.'
+            ]));
+        }
+        if (preset.runtime.router) {
+            const routerPath = path.join(modulePath, 'src', 'router');
+            fs.mkdirSync(routerPath, { recursive: true });
+            changed.push(...this.writeExpansionReadmeIfMissing(path.join(routerPath, 'README.md'), [
+                '# Router Contracts',
+                '',
+                'Document customer-owned API facade routes here before implementation.'
+            ]));
+        }
+        if (options.modulePreset === 'integration-adapter') {
+            const adapterPath = path.join(modulePath, 'src', 'adapter');
+            fs.mkdirSync(adapterPath, { recursive: true });
+            changed.push(...this.writeExpansionReadmeIfMissing(path.join(adapterPath, 'README.md'), [
+                '# Adapter Contracts',
+                '',
+                'Document external system boundaries and local test doubles for this adapter.'
+            ]));
+        }
+        if (options.modulePreset === 'workflow-extension') {
+            const workflowPath = path.join(modulePath, 'src', 'workflow');
+            fs.mkdirSync(workflowPath, { recursive: true });
+            changed.push(...this.writeExpansionReadmeIfMissing(path.join(workflowPath, 'README.md'), [
+                '# Workflow Extensions',
+                '',
+                'Document customer-owned process extensions and approval assumptions here.'
+            ]));
+        }
+        return changed;
+    },
+
+    writeEnvironmentGuidance: function (targetPath, options, sourceEnvironment) {
+        const title = this.toDisplayTitle(options.environmentName, options.environmentName);
+        return [
+            ...this.writeExpansionReadmeIfMissing(path.join(targetPath, 'README.md'), [
+                '# ' + title,
+                '',
+                'Customer environment for ' + options.application.name + '.',
+                '',
+                'Source environment: `' + sourceEnvironment + '`.',
+                'Profile: `' + options.environmentProfile + '`.',
+                '',
+                'Keep environment-specific overrides here. Do not place customer overrides in `nodics.ai` or `nodics.axis`.'
+            ]),
+            ...this.writeExpansionReadmeIfMissing(path.join(targetPath, 'AGENTS.md'), [
+                '# ' + title + ' Agent Guide',
+                '',
+                'This is a customer-owned local environment under `' + options.application.projectName + '`.',
+                'Read the project root `AGENTS.md` before editing environment modules or generated runtime files.',
+                'Generated runtime output can be recreated; source configuration and explicit overrides should be reviewed carefully.'
+            ])
+        ];
+    },
+
+    writeSiteGuidance: function (targetPath, options, title) {
+        return this.writeExpansionReadmeIfMissing(path.join(targetPath, 'AGENTS.md'), [
+            '# ' + title + ' Agent Guide',
+            '',
+            'This is a customer-owned `' + options.siteType + '` site generated by `nodics.installer`.',
+            'Keep custom site work in this repository and avoid customer changes under `nodics.ai` or `nodics.axis`.',
+            'Use the backend project topology metadata only through documented installer or project tooling.'
+        ]);
+    },
+
     addEnvironment: function (plan, options) {
         this.requireSetupEvidence(plan, options);
         this.assertProjectReadyForExpansion(options);
+        const backup = this.createGeneratedBackup(plan, options, 'before-add-environment');
         const sourceEnvironment = options.fromEnvironment || this.initialProvisioning(options).environment;
         const sourcePath = path.join(options.application.projectPath, 'envs', sourceEnvironment);
         const targetPath = path.join(options.application.projectPath, 'envs', options.environmentName);
@@ -3175,6 +3721,7 @@ const installer = {
         changed.push(...this.collectRebrandableFiles(targetPath)
             .filter(filePath => this.replaceTextInFile(filePath, [[sourceEnvironment, options.environmentName]])));
         changed.push(...this.reindexEnvironmentModules(targetPath, options));
+        changed.push(...this.writeEnvironmentGuidance(targetPath, options, sourceEnvironment));
         changed.push(...this.updateProjectExpansionMetadata(options, 'environments', {
             name: options.environmentName,
             source: sourceEnvironment,
@@ -3195,6 +3742,7 @@ const installer = {
             fromEnvironment: sourceEnvironment,
             environmentProfile: options.environmentProfile,
             changed: Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath)),
+            backup,
             evidencePath
         };
     },
@@ -3202,6 +3750,7 @@ const installer = {
     addModule: function (plan, options) {
         this.requireSetupEvidence(plan, options);
         this.assertProjectReadyForExpansion(options);
+        const backup = this.createGeneratedBackup(plan, options, 'before-add-module');
         const modulePath = path.join(options.application.projectPath, 'modules', options.moduleName);
         if (fs.existsSync(modulePath)) {
             throw new Error('Module already exists: ' + modulePath);
@@ -3282,6 +3831,7 @@ const installer = {
             path.join(modulePath, 'config', 'prescripts.js'),
             path.join(modulePath, 'config', 'postscripts.js')
         ];
+        changed.push(...this.modulePresetScaffold(modulePath, options, preset));
         changed.push(...this.updateProjectExpansionMetadata(options, 'modules', {
             name: options.moduleName,
             kind: 'customer-module',
@@ -3300,6 +3850,7 @@ const installer = {
             modulePreset: options.modulePreset,
             modulePath,
             changed: relativeChanged,
+            backup,
             evidencePath
         };
     },
@@ -3384,6 +3935,7 @@ const installer = {
     addSite: function (plan, options) {
         this.requireSetupEvidence(plan, options);
         this.assertProjectReadyForExpansion(options);
+        const backup = this.createGeneratedBackup(plan, options, 'before-add-site');
         const targetPath = path.join(options.workspace, options.siteName);
         const changed = this.prepareExpansionSiteRepository(options);
         const title = this.toDisplayTitle(options.siteName, options.siteName);
@@ -3411,6 +3963,7 @@ const installer = {
                 changed.push(filePath);
             }
         });
+        changed.push(...this.writeSiteGuidance(targetPath, options, title));
         if (options.siteType === 'commerce') {
             changed.push(this.upsertEnvFile(path.join(targetPath, '.env'), {
                 AGORA_SOLUTION: options.accelerator === 'common' ? 'commerce' : options.accelerator,
@@ -3455,6 +4008,7 @@ const installer = {
             frontendPort,
             install,
             changed: relativeChanged,
+            backup,
             evidencePath
         };
     },
@@ -3657,6 +4211,8 @@ const installer = {
             'Expected data packs: ' + result.expectedDataPacks.join(', '),
             'Data: ' + result.data.status,
             'Media: ' + result.media.status,
+            'Schema ownership: ' + result.schemaOwnership.status,
+            'Idempotency: ' + result.idempotency.status,
             'Fix: ' + result.beginnerFix
         ].join('\n');
     },
@@ -3668,6 +4224,8 @@ const installer = {
             'Missing runtimes: ' + (result.missingRuntimes.length ? result.missingRuntimes.join(', ') : 'none'),
             'Data: ' + result.data.status,
             'Media: ' + result.media.status,
+            'Schema ownership: ' + result.readiness.schemaOwnership.status,
+            'Idempotency: ' + result.readiness.idempotency.status,
             'Fix: ' + (result.fix || 'Publishing prerequisites are ready for local acceptance.')
         ].join('\n');
     },
@@ -3680,6 +4238,28 @@ const installer = {
                 lines.push('  fix: ' + check.fix);
             }
         });
+        return lines.join('\n');
+    },
+
+    renderBackup: function (result) {
+        const lines = [
+            'Nodics generated-root backup created',
+            'Backup: ' + result.backupPath,
+            'Manifest: ' + result.manifestPath,
+            'Roots: ' + result.entries.length
+        ];
+        result.entries.forEach(entry => lines.push('- ' + entry.name + ': ' + entry.targetPath));
+        return lines.join('\n');
+    },
+
+    renderRollback: function (result) {
+        const lines = [
+            'Nodics generated-root rollback completed',
+            'Backup id: ' + result.backupId,
+            'Backup: ' + result.backupPath,
+            'Restored: ' + result.restored.length
+        ];
+        result.restored.forEach(root => lines.push('- ' + root));
         return lines.join('\n');
     },
 
@@ -3699,12 +4279,14 @@ const installer = {
     },
 
     repairSetup: function (plan, options) {
+        const backup = this.createGeneratedBackup(plan, options, 'before-repair');
         const changed = this.rebrandGeneratedApplications(plan, options);
         const configure = this.configureApplicationProject(plan, options);
         const manifest = this.writeWorkspaceManifest(plan, options);
         return {
             operation: 'local-setup-repair',
             ok: true,
+            backup,
             changed,
             configure,
             manifestPath: manifest.manifestPath
@@ -3994,14 +4576,20 @@ const installer = {
     dataReadinessStatus: function (plan, options) {
         const data = this.dataSeedReadiness(options);
         const media = this.mediaAssetReadiness(options);
+        const schemaOwnership = this.schemaOwnershipReadiness(options);
+        const idempotency = this.idempotencyReadiness(options);
         return {
             contractVersion: JSON_RESULT_CONTRACTS.dataReadiness,
             operation: 'local-data-readiness',
-            ok: data.status === 'passed',
+            ok: data.status === 'passed' && media.status === 'passed' &&
+                schemaOwnership.status === 'passed' && idempotency.status === 'passed',
             data,
             media,
+            schemaOwnership,
+            idempotency,
             expectedDataPacks: plan.accelerator.dataPacks,
-            beginnerFix: data.fix || media.fix || 'Starter data manifests and media references are present.'
+            beginnerFix: data.fix || media.fix || schemaOwnership.fix || idempotency.fix ||
+                'Starter data manifests, media references, schema ownership, and idempotent scripts are present.'
         };
     },
 
@@ -4016,14 +4604,15 @@ const installer = {
         return {
             contractVersion: JSON_RESULT_CONTRACTS.publishingCheck,
             operation: 'local-publishing-check',
-            ok: data.status === 'passed' && media.status === 'passed' && missingRuntimes.length === 0,
+            ok: readiness.status === 'passed' && data.status === 'passed' &&
+                media.status === 'passed' && missingRuntimes.length === 0,
             readiness,
             data,
             media,
             missingRuntimes,
             command: readiness.command,
             fix: missingRuntimes.length ? 'Start topology before publishing acceptance.' :
-                (data.fix || media.fix || undefined)
+                (data.fix || media.fix || readiness.schemaOwnership.fix || readiness.idempotency.fix || undefined)
         };
     },
 
@@ -4057,6 +4646,7 @@ const installer = {
         if (topology && this.topologyIsReady(topology.status)) {
             throw new Error('Refusing to cleanup workspace while topology is running. Run --action=stop --yes first.');
         }
+        const backup = this.createGeneratedBackup(plan, options, 'before-cleanup-workspace');
         const protectedRoots = new Set(VENDOR_OWNED_REPOSITORIES);
         const candidates = plan.repositories
             .filter(repository => !protectedRoots.has(repository.name))
@@ -4071,14 +4661,50 @@ const installer = {
         });
         const evidenceRoot = path.join(options.workspace, '.nodics-installer');
         if (fs.existsSync(evidenceRoot)) {
-            fs.rmSync(evidenceRoot, { recursive: true, force: true });
-            removed.push(evidenceRoot);
+            ['setup-evidence.json', 'expansion-evidence.json'].forEach(fileName => {
+                const evidenceFile = path.join(evidenceRoot, fileName);
+                if (fs.existsSync(evidenceFile)) {
+                    fs.rmSync(evidenceFile, { force: true });
+                    removed.push(evidenceFile);
+                }
+            });
+            fs.readdirSync(evidenceRoot, { withFileTypes: true })
+                .filter(entry => entry.name.startsWith('support-bundle-'))
+                .forEach(entry => {
+                    const target = path.join(evidenceRoot, entry.name);
+                    fs.rmSync(target, { recursive: true, force: true });
+                    removed.push(target);
+                });
         }
         return {
             operation: 'local-workspace-cleanup',
             ok: true,
             removed,
+            backup,
             protectedRoots: Array.from(protectedRoots)
+        };
+    },
+
+    successSummary: function (plan, options, operation) {
+        return {
+            operation: 'local-setup-success-summary',
+            sourceOperation: operation,
+            workspace: options.workspace,
+            application: options.application.name,
+            backendProject: options.application.projectName,
+            firstEnvironment: this.initialProvisioning(options).environment,
+            expectedUrls: plan.expectedUrls,
+            customerRoots: this.customerCustomizationMap(options),
+            protectedVendorRoots: VENDOR_OWNED_REPOSITORIES,
+            nextCommands: [
+                'npx github:Nodics/nodics.installer --action=status --workspace=' + options.workspace +
+                    ' --application-name="' + options.application.name + '"',
+                'npx github:Nodics/nodics.installer --action=logs --workspace=' + options.workspace +
+                    ' --application-name="' + options.application.name + '" --explain',
+                'npx github:Nodics/nodics.installer --action=support-bundle --yes --workspace=' + options.workspace +
+                    ' --application-name="' + options.application.name + '"'
+            ],
+            message: 'Local setup work is customer-owned in the named project, sites, modules, and environments. Keep nodics.ai and nodics.axis clean for upgrades.'
         };
     },
 
@@ -4344,7 +4970,13 @@ const installer = {
         if (options.executionLevel === 'download') {
             evidence.finishedAt = new Date().toISOString();
             this.writeEvidence(plan.evidencePath, evidence);
-            return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
+            return {
+                operation: 'local-setup-execution',
+                ok: true,
+                evidencePath: plan.evidencePath,
+                evidence,
+                summary: this.successSummary(plan, options, 'local-setup-execution')
+            };
         }
         runStage('install-framework', 'Install framework dependencies', () => this.installFrameworkDependencies(plan, options));
         runStage('configure', 'Configure application framework link', () => this.configureApplicationProject(plan, options));
@@ -4352,7 +4984,13 @@ const installer = {
         if (options.executionLevel === 'install') {
             evidence.finishedAt = new Date().toISOString();
             this.writeEvidence(plan.evidencePath, evidence);
-            return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
+            return {
+                operation: 'local-setup-execution',
+                ok: true,
+                evidencePath: plan.evidencePath,
+                evidence,
+                summary: this.successSummary(plan, options, 'local-setup-execution')
+            };
         }
         if (!this.stepCompleted(evidence, 'preflight')) {
             const preflightResult = await this.preflight(plan, options);
@@ -4370,7 +5008,13 @@ const installer = {
         if (options.executionLevel === 'preflight') {
             evidence.finishedAt = new Date().toISOString();
             this.writeEvidence(plan.evidencePath, evidence);
-            return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
+            return {
+                operation: 'local-setup-execution',
+                ok: true,
+                evidencePath: plan.evidencePath,
+                evidence,
+                summary: this.successSummary(plan, options, 'local-setup-execution')
+            };
         }
         const startStatus = this.stepCompleted(evidence, 'start', START_STAGE_VERSION) ?
             this.readTopologyStatus(options).status : null;
@@ -4388,7 +5032,13 @@ const installer = {
         if (options.executionLevel === 'start') {
             evidence.finishedAt = new Date().toISOString();
             this.writeEvidence(plan.evidencePath, evidence);
-            return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
+            return {
+                operation: 'local-setup-execution',
+                ok: true,
+                evidencePath: plan.evidencePath,
+                evidence,
+                summary: this.successSummary(plan, options, 'local-setup-execution')
+            };
         }
         if (options.accelerator !== 'common' || options.initialize || options.sampleData || options.freshData) {
             runStage('initialize', 'Run guided initialization', () => this.runGuidedInitialization(options));
@@ -4396,14 +5046,26 @@ const installer = {
         if (options.executionLevel === 'initialize') {
             evidence.finishedAt = new Date().toISOString();
             this.writeEvidence(plan.evidencePath, evidence);
-            return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
+            return {
+                operation: 'local-setup-execution',
+                ok: true,
+                evidencePath: plan.evidencePath,
+                evidence,
+                summary: this.successSummary(plan, options, 'local-setup-execution')
+            };
         }
         if (options.executionLevel === 'acceptance' || options.acceptance) {
             runStage('acceptance', 'Run acceptance checks', () => this.runAcceptanceChecks(options));
         }
         evidence.finishedAt = new Date().toISOString();
         this.writeEvidence(plan.evidencePath, evidence);
-        return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
+        return {
+            operation: 'local-setup-execution',
+            ok: true,
+            evidencePath: plan.evidencePath,
+            evidence,
+            summary: this.successSummary(plan, options, 'local-setup-execution')
+        };
     },
 
     printResult: function (options, result, textRenderer) {
@@ -4585,9 +5247,21 @@ const installer = {
             this.printResult(options, result, troubleshooting => this.renderTroubleshooting(troubleshooting));
             return true;
         }
+        if (options.action === 'backup') {
+            const result = this.createGeneratedBackup(plan, options, 'manual');
+            this.printResult(options, result, backup => this.renderBackup(backup));
+            return true;
+        }
+        if (options.action === 'rollback') {
+            const result = this.rollbackGeneratedBackup(plan, options);
+            this.printResult(options, result, rollback => this.renderRollback(rollback));
+            return true;
+        }
         if (options.action === 'start') {
             const result = await this.ensureTopologyStarted(options);
-            this.printResult(options, result, start => 'Nodics topology start completed\nStatus: ' + start.status);
+            result.summary = this.successSummary(plan, options, result.operation || 'local-setup-start');
+            this.printResult(options, result, start => 'Nodics topology start completed\nStatus: ' + start.status +
+                '\nBackend project: ' + start.summary.backendProject);
             return true;
         }
         if (options.action === 'stop') {
@@ -4603,13 +5277,16 @@ const installer = {
         }
         if (options.action === 'repair') {
             const result = this.repairSetup(plan, options);
-            this.printResult(options, result, repair => 'Nodics Installer repair completed\nChanged files: ' + repair.changed.length);
+            result.summary = this.successSummary(plan, options, result.operation);
+            this.printResult(options, result, repair => 'Nodics Installer repair completed\nChanged files: ' +
+                repair.changed.length + '\nBackup: ' + repair.backup.backupPath);
             return true;
         }
         if (options.action === 'initialize') {
             const start = await this.ensureTopologyStarted(options);
             const initialize = this.runOperationalStep(options, 'initialize', () => this.runGuidedInitialization(options));
             const result = { operation: 'local-setup-initialize', ok: initialize.status === 'passed', start, initialize };
+            result.summary = this.successSummary(plan, options, result.operation);
             if (!result.ok) {
                 process.exitCode = 1;
             }
@@ -4620,6 +5297,7 @@ const installer = {
             const start = await this.ensureTopologyStarted(options);
             const acceptance = this.runOperationalStep(options, 'acceptance', () => this.runAcceptanceChecks(options));
             const result = { operation: 'local-setup-acceptance', ok: acceptance.status === 'passed', start, acceptance };
+            result.summary = this.successSummary(plan, options, result.operation);
             if (!result.ok) {
                 process.exitCode = 1;
             }
@@ -4635,7 +5313,8 @@ const installer = {
         if (options.action === 'cleanup-workspace') {
             const result = this.cleanupWorkspace(plan, options);
             this.printResult(options, result, cleanup => 'Nodics generated workspace cleanup completed\nProtected: ' +
-                cleanup.protectedRoots.join(', ') + '\nRemoved: ' + (cleanup.removed.length ? cleanup.removed.join('\n') : 'nothing'));
+                cleanup.protectedRoots.join(', ') + '\nBackup: ' + cleanup.backup.backupPath +
+                '\nRemoved: ' + (cleanup.removed.length ? cleanup.removed.join('\n') : 'nothing'));
             return true;
         }
         if (options.action === 'uninstall') {
@@ -4643,7 +5322,8 @@ const installer = {
             const cleanup = this.cleanupWorkspace(plan, options);
             const result = { operation: 'local-workspace-uninstall', ok: true, stop, cleanup };
             this.printResult(options, result, uninstall => 'Nodics local uninstall completed\nStop: ' +
-                uninstall.stop.status + '\nRemoved: ' + (uninstall.cleanup.removed.length ? uninstall.cleanup.removed.join('\n') : 'nothing'));
+                uninstall.stop.status + '\nBackup: ' + uninstall.cleanup.backup.backupPath +
+                '\nRemoved: ' + (uninstall.cleanup.removed.length ? uninstall.cleanup.removed.join('\n') : 'nothing'));
             return true;
         }
         if (options.action === 'add-environment') {
@@ -4667,7 +5347,9 @@ const installer = {
         if (options.action === 'execute') {
             const result = await this.executeSetup(plan, options);
             this.printResult(options, result, execution =>
-                'Nodics Installer execution completed\nEvidence: ' + execution.evidencePath);
+                'Nodics Installer execution completed\nEvidence: ' + execution.evidencePath +
+                '\nBackend project: ' + execution.summary.backendProject +
+                '\nNext status command: ' + execution.summary.nextCommands[0]);
             return true;
         }
         this.printResult(options, plan, planned => this.renderTextPlan(planned));
