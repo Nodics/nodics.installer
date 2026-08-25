@@ -706,7 +706,10 @@ const installer = {
             { stage: 'initialize', cwd: project, command: 'npm run acceptance:agora-cms-media-seed', when: options.accelerator !== 'common' },
             { stage: 'initialize', cwd: project, command: 'npm run acceptance:guided-initialization', when: options.accelerator !== 'common' },
             { stage: 'acceptance', cwd: project, command: 'npm run acceptance:local', when: runsAcceptance,
-                env: { AXIS_PROJECT: options.application.projectName } },
+                env: {
+                    AXIS_PROJECT: options.application.projectName,
+                    NODICS_AXIS_ROOT: options.application.axisPath
+                } },
             { stage: 'acceptance', cwd: project, command: 'npm run test:multi-domain', when: options.accelerator === 'combined' }
         ];
         return this.normalizeCommands(commands);
@@ -1769,7 +1772,8 @@ const installer = {
         return options.mode === 'docker' ?
             this.runProjectCommand(options, 'docker-local:acceptance', [], false) :
             this.runProjectCommand(options, 'acceptance:local', [], false, {
-                AXIS_PROJECT: options.application.projectName
+                AXIS_PROJECT: options.application.projectName,
+                NODICS_AXIS_ROOT: options.application.axisPath
             });
     },
 

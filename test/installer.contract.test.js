@@ -675,7 +675,8 @@ test('acceptance execution level runs acceptance checks without extra flag', asy
     const plan = service.createSetupPlan(options);
     assert(plan.commands.some(command => command.stage === 'acceptance' &&
         command.command === 'npm run acceptance:local' &&
-        command.env.AXIS_PROJECT === 'acceptance-level.startio'));
+        command.env.AXIS_PROJECT === 'acceptance-level.startio' &&
+        command.env.NODICS_AXIS_ROOT === options.application.axisPath));
     const result = await service.executeSetup(plan, options);
 
     assert.equal(result.ok, true);
