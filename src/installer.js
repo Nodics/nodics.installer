@@ -37,6 +37,7 @@ const MUTATING_ACTIONS = new Set([
 const VALID_EXECUTION_LEVELS = new Set(['download', 'install', 'preflight', 'start', 'initialize', 'acceptance']);
 const VALID_CLONE_MODES = new Set(['https', 'ssh', 'existing']);
 const VALID_SITE_TYPES = new Set(['company', 'commerce']);
+const VENDOR_OWNED_REPOSITORIES = Object.freeze(['nodics.ai', 'nodics.axis']);
 
 const DEFAULT_REPOSITORIES = Object.freeze({
     framework: {
@@ -219,6 +220,11 @@ const installer = {
         return this.toApplicationSlug(applicationName) + '.' + (commerceSuffixByAccelerator[accelerator] || 'commerce');
     },
 
+    isVendorOwnedName: function (value) {
+        const slug = this.toApplicationSlug(value || '');
+        return VENDOR_OWNED_REPOSITORIES.includes(slug);
+    },
+
     createApplicationIdentity: function (options) {
         const title = this.toApplicationTitle(options.applicationName);
         const slug = this.toApplicationSlug(options.applicationName);
@@ -340,6 +346,10 @@ const installer = {
         const commerceSiteName = this.readOption(args, '--commerce-site-name',
             this.readOption(args, '--storefront-name', ''));
         const companySiteName = this.readOption(args, '--company-site-name', '');
+        const rawEnvironmentName = this.readOption(args, '--environment-name', '');
+        const rawFromEnvironment = this.readOption(args, '--from-environment', '');
+        const rawModuleName = this.readOption(args, '--module-name', '');
+        const rawSiteName = this.readOption(args, '--site-name', '');
         const accelerator = this.readOption(args, '--accelerator', 'common').toLowerCase();
         const explicitApps = this.readOption(args, '--apps', null);
         const defaultApps = explicitApps === null ? ['axis'] : [];
@@ -396,11 +406,14 @@ const installer = {
             policyPack: this.readOption(args, '--policy-pack', ''),
             runtime: this.readOption(args, '--runtime', ''),
             lines: Number(this.readOption(args, '--lines', '80')) || 80,
-            environmentName: this.toNodicsIdentifier(this.readOption(args, '--environment-name', '')),
-            fromEnvironment: this.toNodicsIdentifier(this.readOption(args, '--from-environment', '')),
-            moduleName: this.toNodicsIdentifier(this.readOption(args, '--module-name', '')),
-            siteName: this.readOption(args, '--site-name', '') ?
-                this.toApplicationSlug(this.readOption(args, '--site-name', '')) : '',
+            rawEnvironmentName,
+            rawFromEnvironment,
+            rawModuleName,
+            rawSiteName,
+            environmentName: this.toNodicsIdentifier(rawEnvironmentName),
+            fromEnvironment: this.toNodicsIdentifier(rawFromEnvironment),
+            moduleName: this.toNodicsIdentifier(rawModuleName),
+            siteName: rawSiteName ? this.toApplicationSlug(rawSiteName) : '',
             siteType: this.readOption(args, '--site-type', 'commerce').toLowerCase()
         };
         options.application = this.createApplicationIdentity(options);
@@ -579,12 +592,18 @@ const installer = {
         if (options.action === 'add-module' && !validIdentifier.test(options.moduleName)) {
             errors.push('add-module requires --module-name, for example --module-name=acmeLoyalty.');
         }
+        if (options.action === 'add-module' && this.isVendorOwnedName(options.rawModuleName)) {
+            errors.push('add-module cannot target vendor-owned repositories such as nodics.ai or nodics.axis.');
+        }
         if (options.action === 'add-site') {
             if (!options.siteName || !validSlug.test(options.siteName)) {
                 errors.push('add-site requires --site-name, for example --site-name=acme.electronics.');
             }
             if (!VALID_SITE_TYPES.has(options.siteType)) {
                 errors.push('add-site requires --site-type=commerce or --site-type=company.');
+            }
+            if (this.isVendorOwnedName(options.rawSiteName)) {
+                errors.push('add-site cannot target vendor-owned repositories such as nodics.ai or nodics.axis.');
             }
         }
         if (options.workspace === path.parse(options.workspace).root || options.workspace === os.homedir()) {
@@ -755,6 +774,27 @@ const installer = {
         };
     },
 
+    vendorRepositoryPolicy: function () {
+        return {
+            owner: 'Nodics',
+            repositories: VENDOR_OWNED_REPOSITORIES,
+            customerRule: 'Do not change partner or customer custom code inside vendor-owned repositories.',
+            reason: 'Local changes under nodics.ai or nodics.axis make future Nodics upgrades and migrations difficult.',
+            allowedWork: [
+                'read source and documentation',
+                'run documented local scripts',
+                'sync to an approved release branch or tag',
+                'report required changes upstream to Nodics'
+            ],
+            customWorkRoots: [
+                'named customer backend project',
+                'named customer company site',
+                'named customer commerce sites',
+                'customer-owned modules and environments'
+            ]
+        };
+    },
+
     createSetupPlan: function (options) {
         const validation = this.validateOptions(options);
         if (!validation.valid) {
@@ -802,6 +842,7 @@ const installer = {
                 gates: profile.gates
             },
             initialProvisioning: this.initialProvisioning(options),
+            vendorRepositoryPolicy: this.vendorRepositoryPolicy(),
             prerequisites: [
                 { code: 'node', command: 'node --version', required: true },
                 { code: 'npm', command: 'npm --version', required: true },
@@ -829,6 +870,7 @@ const installer = {
                 'Plan and preflight actions do not clone, install, start, reset, or write project repositories.',
                 'Execute requires --yes.',
                 'Dirty existing repositories are refused instead of overwritten.',
+                'Customer and partner customizations must stay out of nodics.ai and nodics.axis.',
                 'Secrets are sanitized from command output before evidence is written.',
                 'Production certification is not claimed from local setup evidence.'
             ],
@@ -865,6 +907,10 @@ const installer = {
         lines.push('- Sites: ' + (plan.initialProvisioning.sites.length ?
             plan.initialProvisioning.sites.join(', ') : 'none'));
         lines.push('- Later expansion actions: ' + plan.initialProvisioning.laterExpansion.join(', '));
+        lines.push('', 'Vendor-owned repository boundary:');
+        lines.push('- Do not customize: ' + plan.vendorRepositoryPolicy.repositories.join(', '));
+        lines.push('- Custom work belongs in: ' + plan.vendorRepositoryPolicy.customWorkRoots.join(', '));
+        lines.push('- Why: ' + plan.vendorRepositoryPolicy.reason);
         lines.push('', 'Repositories:');
         plan.repositories.forEach(repository => {
             lines.push('- ' + repository.name + ' -> ' + repository.targetPath);

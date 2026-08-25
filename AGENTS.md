@@ -8,7 +8,7 @@ non-runtime tooling. Keep `package.json.nodics.runtimeModule` and
 `package.json.nodics.loadableByNodicsModuleLoader` set to `false`.
 
 Use this repository when a user does not yet have `nodics.ai`,
-`nodics.kickoff`, or `nodics.exp` locally. The installer asks beginner
+`nodics.axis`, or a named customer application project locally. The installer asks beginner
 questions, creates a safe setup plan, downloads or reuses repositories, delegates
 Nodics-aware work to framework/project tooling after those repositories exist,
 and writes local setup evidence.
@@ -29,6 +29,13 @@ When the installer is used from an AI tool, confirm the target workspace before
 mutating actions and keep generated customer-local output out of source
 repository commits unless the user explicitly asks otherwise.
 
+For partner and customer workspaces, treat `nodics.ai` and `nodics.axis` as
+vendor-owned read-only customization boundaries. Read them, run documented
+scripts, and sync approved releases, but do not place customer customizations
+inside them. Customer work belongs in the named backend project, named sites,
+customer modules, and customer environments so upgrades and migrations remain
+manageable.
+
 ## Ownership
 
 - Own beginner bootstrap questions, setup-plan creation, repository
@@ -38,16 +45,16 @@ repository commits unless the user explicitly asks otherwise.
 - Delegate framework-aware validation, topology, Docker Local, guided
   initialization, Application Builder, qualification, and upgrade contracts to
   `nodics.ai` / `nTooling`.
-- Delegate reference runtime composition, local environments, project data packs,
-  and acceptance aliases to `nodics.kickoff`.
-- Delegate frontend app catalogue and app fetch/status/verify behavior to
-  `nodics.exp`.
+- Delegate customer runtime composition, local environments, project data packs,
+  and acceptance aliases to the named customer backend project.
+- Delegate BackOffice behavior to `nodics.axis`.
 
 ## Safety Rules
 
 - Default to dry-run planning before execution.
 - Never run destructive Git commands.
 - Never reset, overwrite, or delete a dirty existing checkout automatically.
+- Never add partner/customer customizations under `nodics.ai` or `nodics.axis`.
 - Never print secret values into normal logs or setup summaries.
 - Roll back only paths created by the current installer operation.
 - Keep beginner text plain; hide raw Nodics module names until evidence or

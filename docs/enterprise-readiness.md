@@ -142,6 +142,30 @@ For generated application projects, verify:
 - no user-facing generated identity points to Kickoff, Agora, or Nexus unless
   the file is intentionally documenting template origin.
 
+## Vendor-Owned Repository Boundary
+
+`nodics.ai` and `nodics.axis` are vendor-owned repositories in a partner or
+customer workspace. They are allowed local dependencies, not customization
+targets.
+
+Policy:
+
+- partner/customer custom work must not be added under `nodics.ai`;
+- partner/customer custom work must not be added under `nodics.axis`;
+- installer expansion actions must target named customer projects, modules,
+  environments, and sites only;
+- framework or BackOffice changes needed by a customer must be raised upstream
+  to Nodics and delivered through an approved release branch or tag.
+
+Reason: local customer changes in vendor-owned repositories create upgrade,
+support, and migration conflicts. The stable boundary is:
+
+- `nodics.ai` owns framework contracts, runtime tooling, and platform behavior;
+- `nodics.axis` owns standard BackOffice behavior;
+- the named customer backend project owns runtime composition and custom
+  modules;
+- named customer sites own customer-facing experience.
+
 ## Expansion Governance
 
 First-machine setup is intentionally small. It creates the named customer

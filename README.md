@@ -229,6 +229,31 @@ a beginner.
 The framework repository remains `nodics.ai` and the BackOffice application
 remains `nodics.axis`. Only customer-owned template identity is renamed.
 
+## Vendor-Owned Repository Boundary
+
+For partner and customer projects, treat `nodics.ai` and `nodics.axis` as
+vendor-owned repositories. They are downloaded so the local application can run,
+but partner/customer customization must not be made inside them.
+
+Why this matters:
+
+- `nodics.ai` carries framework contracts, runtime tooling, and upgrade rules.
+- `nodics.axis` carries the standard BackOffice application.
+- Local changes in either repository make future Nodics migration, patching, and
+  support much harder.
+
+Customer work belongs in the named customer repositories:
+
+- backend application project, for example `acme.startio`;
+- company site, for example `acme.web`;
+- commerce sites, for example `acme.apparel` or `acme.electronics`;
+- customer-owned modules and environments created later by expansion actions.
+
+It is fine to read `nodics.ai` and `nodics.axis`, run documented scripts from
+them, and sync them to an approved branch or tag. Required product changes
+should be reported upstream to Nodics instead of patched locally in a customer
+workspace.
+
 The custom project journey is intentionally still blocked. The installer reports
 that path as deferred until the reference local setup is stable enough to become
 the reusable base for project creation.

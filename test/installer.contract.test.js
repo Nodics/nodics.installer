@@ -101,6 +101,9 @@ test('creates an executable beginner local setup plan', () => {
     assert.deepEqual(plan.initialProvisioning.modules, ['acmeCore', 'acmeApi', 'acmeInt']);
     assert.deepEqual(plan.initialProvisioning.sites, ['acme.web', 'acme.apparel']);
     assert.deepEqual(plan.initialProvisioning.laterExpansion, ['add-environment', 'add-module', 'add-site']);
+    assert.deepEqual(plan.vendorRepositoryPolicy.repositories, ['nodics.ai', 'nodics.axis']);
+    assert.match(plan.vendorRepositoryPolicy.reason, /upgrades and migrations/);
+    assert(plan.safetyRules.some(rule => rule.includes('nodics.ai') && rule.includes('nodics.axis')));
     assert.deepEqual(plan.accelerator.domains, ['common', 'apparel']);
     assert(plan.repositories.some(repository => repository.name === 'nodics.ai'));
     assert(plan.repositories.some(repository => repository.name === 'acme.startio'));
@@ -213,6 +216,18 @@ test('rejects unsafe or deferred execution paths', () => {
         '--action=add-site',
         '--yes'
     ])), /add-site requires --site-name/);
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--action=add-module',
+        '--yes',
+        '--module-name=nodics.ai'
+    ])), /vendor-owned repositories/);
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--action=add-site',
+        '--yes',
+        '--site-name=nodics.axis'
+    ])), /vendor-owned repositories/);
 });
 
 test('questionnaire answers merge into normal options', async () => {
@@ -960,6 +975,18 @@ test('CLI prints structured JSON', () => {
     assert.equal(parsed.operation, 'local-setup-plan');
     assert.equal(parsed.installer.packageName, '@nodics/installer');
     assert.equal(parsed.installer.version, '0.7.0');
+});
+
+test('text plan warns beginners not to customize vendor-owned repositories', () => {
+    const plan = installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--accelerator=apparel'
+    ]));
+    const text = installer.renderTextPlan(plan);
+    assert.match(text, /Vendor-owned repository boundary/);
+    assert.match(text, /Do not customize: nodics\.ai, nodics\.axis/);
+    assert.match(text, /future Nodics upgrades and migrations/);
 });
 
 test('CLI prints beginner-readable JSON errors without stack traces', () => {
