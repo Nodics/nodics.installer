@@ -442,6 +442,12 @@ test('rebrand rewrites generated topology frontend roots', () => {
     installer.rebrandProjectFiles(projectPath, options);
     installer.configureFrontendEnvironmentFiles(options);
     const projectJson = JSON.parse(fs.readFileSync(path.join(projectPath, 'nodics.project.json'), 'utf8'));
+    assert.deepEqual(projectJson.acceptance.localBootstrap.documentationPacks.map(pack => pack.code), [
+        'nodicsDocumentation',
+        'axisDocumentation'
+    ]);
+    assert.equal(projectJson.acceptance.localBootstrap.axisSmoke.expectDocumentation, false);
+    assert(!projectJson.acceptance.localBootstrap.axisSmoke.routes.includes('/docs/nodics-kickoff'));
     assert.deepEqual(projectJson.topology.groups.frontends.map(frontend => ({
         code: frontend.code,
         label: frontend.label,
@@ -493,6 +499,37 @@ test('rebrand rewrites generated topology frontend roots', () => {
     assert(!fs.existsSync(path.join(axisPath, '.env')));
     assert.match(fs.readFileSync(path.join(companyPath, '.env'), 'utf8'), /NEXUS_PLATFORM_BASE_URL=http:\/\/localhost:4300/);
     assert.match(fs.readFileSync(path.join(commercePath, '.env'), 'utf8'), /AGORA_SOLUTION=apparel/);
+});
+
+test('local bootstrap acceptance capabilities are project-declared', () => {
+    const installerSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'installer.js'), 'utf8');
+    const acme = installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--project-name=acme.startio'
+    ]);
+    const kickoff = installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Nodics Kickoff',
+        '--project-name=nodics.kickoff'
+    ]);
+
+    const acmeCapabilities = installer.localBootstrapAcceptanceCapabilities(acme);
+    const kickoffCapabilities = installer.localBootstrapAcceptanceCapabilities(kickoff);
+
+    assert.deepEqual(acmeCapabilities.documentationPacks.map(pack => pack.code), [
+        'nodicsDocumentation',
+        'axisDocumentation'
+    ]);
+    assert.equal(acmeCapabilities.axisSmoke.expectDocumentation, false);
+    assert(!acmeCapabilities.axisSmoke.routes.includes('/docs/nodics-kickoff'));
+    assert(kickoffCapabilities.documentationPacks.some(pack => pack.code === 'kickoffDocumentation'));
+    assert.equal(kickoffCapabilities.axisSmoke.expectDocumentation, true);
+    assert(kickoffCapabilities.axisSmoke.routes.includes('/docs/nodics-kickoff'));
+    assert(
+        !installerSource.includes(["options.application.projectName", " === 'nodics.kickoff'"].join('')),
+        'local acceptance capabilities must come from starter metadata, not a hard-coded output project name'
+    );
 });
 
 test('docker mode first run keeps only the Docker Local environment', () => {

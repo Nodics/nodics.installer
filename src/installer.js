@@ -79,6 +79,23 @@ const FRONTEND_REPOSITORIES = Object.freeze({
     }
 });
 
+const TEMPLATE_ACCEPTANCE_CAPABILITIES = Object.freeze({
+    [DEFAULT_REPOSITORIES.applicationTemplate.name]: Object.freeze({
+        documentationPacks: Object.freeze([
+            Object.freeze({
+                code: 'kickoffDocumentation',
+                profileCode: 'kickoffdocs',
+                minimumRoutes: 4,
+                navigationComponent: 'kickoffDocumentationNavigation',
+                site: 'kickoffDocumentationSite',
+                path: '/docs/nodics-kickoff'
+            })
+        ]),
+        routes: Object.freeze(['/docs/nodics-kickoff']),
+        expectDocumentation: true
+    })
+});
+
 const ACCELERATOR_PROFILES = Object.freeze({
     common: {
         domains: ['common'],
@@ -237,7 +254,7 @@ const installer = {
         const companySlug = this.toApplicationSlug(options.companySiteName || this.defaultCompanySiteName(options.applicationName));
         const modulePrefix = this.toLowerCamelIdentifier(slug);
         const servicePrefix = this.toUpperCamelIdentifier(modulePrefix);
-        return {
+        const identity = {
             name: title,
             code: slug,
             projectName: projectSlug,
@@ -260,6 +277,13 @@ const installer = {
             commerceSitePath: path.join(options.workspace, commerceSlug),
             axisPath: path.join(options.workspace, 'nodics.axis')
         };
+        Object.defineProperty(identity, 'sourceTemplate', {
+            value: DEFAULT_REPOSITORIES.applicationTemplate.name
+        });
+        Object.defineProperty(identity, 'preservesSourceTemplateIdentity', {
+            value: projectSlug === DEFAULT_REPOSITORIES.applicationTemplate.name
+        });
+        return identity;
     },
 
     applicationDataPacks: function (options, profile) {
@@ -1504,6 +1528,67 @@ const installer = {
         return identityPath;
     },
 
+    localBootstrapAcceptanceCapabilities: function (options) {
+        const documentationPacks = [
+            {
+                code: 'nodicsDocumentation',
+                profileCode: 'frameworkdocs',
+                minimumRoutes: 9,
+                navigationComponent: 'nodicsDocumentationNavigation',
+                site: 'nodicsDocumentationSite',
+                path: '/docs/framework'
+            },
+            {
+                code: 'axisDocumentation',
+                profileCode: 'axisdocs',
+                minimumRoutes: 14,
+                navigationComponent: 'axisDocumentationNavigation',
+                site: 'axisDocumentationSite',
+                path: '/docs/nodics-axis'
+            }
+        ];
+        const templateCapabilities = options.application.preservesSourceTemplateIdentity ?
+            TEMPLATE_ACCEPTANCE_CAPABILITIES[options.application.sourceTemplate] : null;
+        if (templateCapabilities) {
+            documentationPacks.push(...templateCapabilities.documentationPacks.map(pack => ({ ...pack })));
+        }
+        const smokeRoutes = [
+            '/',
+            '/docs',
+            '/docs/framework',
+            '/docs/nodics-axis',
+            '/content',
+            '/content/designer',
+            '/media',
+            '/process',
+            '/process/definitions',
+            '/process/tasks',
+            '/process/triggers',
+            '/process/designer',
+            '/cron',
+            '/system-integrations',
+            '/registry',
+            '/operations/imports-exports',
+            '/docs/framework/process',
+            '/docs/framework/process/visual-designer',
+            '/docs/swaggers'
+        ];
+        if (templateCapabilities) {
+            smokeRoutes.splice(4, 0, ...templateCapabilities.routes);
+        }
+        return {
+            documentationPacks,
+            contentPacks: [],
+            axisSmoke: {
+                expectModules: true,
+                expectDocumentation: Boolean(templateCapabilities && templateCapabilities.expectDocumentation),
+                cronLifecycle: true,
+                processLifecycle: true,
+                routes: smokeRoutes
+            }
+        };
+    },
+
     updateProjectTopologyIdentity: function (projectPath, options) {
         const projectJsonPath = path.join(projectPath, 'nodics.project.json');
         if (!fs.existsSync(projectJsonPath)) {
@@ -1556,6 +1641,12 @@ const installer = {
                 delete acceptanceUrls.agora;
                 changed = true;
             }
+        }
+        projectJson.acceptance = projectJson.acceptance || {};
+        const localBootstrap = this.localBootstrapAcceptanceCapabilities(options);
+        if (JSON.stringify(projectJson.acceptance.localBootstrap) !== JSON.stringify(localBootstrap)) {
+            projectJson.acceptance.localBootstrap = localBootstrap;
+            changed = true;
         }
         if (changed) {
             this.writeJsonFile(projectJsonPath, projectJson);
