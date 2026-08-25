@@ -149,7 +149,7 @@ local package script to run.
 2. create a safe setup plan;
 3. check local prerequisites;
 4. download or reuse required repositories;
-5. configure the named application project;
+5. create the named application project with the selected first local environment;
 6. install dependencies;
 7. start the selected local topology when explicitly requested;
 8. guide initialization and acceptance;
@@ -218,8 +218,13 @@ uses:
 - `modules/acmeCore` for shared customer behavior;
 - `modules/acmeApi` for customer API customizations;
 - `modules/acmeInt` for customer integration customizations;
-- `envs/acmeLocal` for direct Node.js local runtime composition;
-- `envs/acmeDockerLocal` for Docker Local production-simulation composition.
+- `envs/acmeLocal` for the first direct Node.js local runtime composition.
+
+If the customer explicitly selects `--mode=docker`, the first local environment
+is `envs/acmeDockerLocal` instead. The first installer execution keeps only the
+selected local environment. Additional environments, modules, and sites are
+treated as later expansion work so the first workspace stays understandable for
+a beginner.
 
 The framework repository remains `nodics.ai` and the BackOffice application
 remains `nodics.axis`. Only customer-owned template identity is renamed.
@@ -273,6 +278,23 @@ Recommended beginner sequence:
 5. Run `--action=execute --yes --execution-level=preflight` to run installer and topology checks.
 6. Run `--action=execute --yes --execution-level=start` when the machine is ready to start services.
 7. Use `--execution-level=initialize` or `--execution-level=acceptance --acceptance` for the longer data and validation path.
+
+## Later Expansion
+
+After the first local environment is working, the same installer will become
+the entry point for controlled expansion:
+
+- `add-environment` for another environment such as QA, staging, production
+  simulation, or an additional local variant;
+- `add-module` for a new customer-owned backend module;
+- `add-site` for another customer-facing site such as electronics, telco, or a
+  future storefront.
+
+Those expansion actions must read the existing installer evidence and project
+identity before creating anything. They must add only the requested item, update
+the project contract and environment links, refuse dirty repositories, and write
+new evidence. They must not rerun the first-machine bootstrap or rename the
+already-created `acme.startio`, `acme.web`, or `acme.apparel` projects.
 
 After startup, these daily commands are usually enough:
 
@@ -601,8 +623,9 @@ The installer follows these rules:
 
 ## Current Status
 
-Version `0.7.0` implements the multi-site application identity, Docker identity
-cleanup, npm package readiness, and local operations setup contract:
+Version `0.7.0` implements the multi-site application identity, selected local
+environment identity, Docker identity cleanup, npm package readiness, and local
+operations setup contract:
 
 - guided option parsing and questionnaire support;
 - named backend project, company site, and commerce site setup planning;
@@ -610,7 +633,7 @@ cleanup, npm package readiness, and local operations setup contract:
 - accelerator mapping;
 - prerequisite, doctor, and port preflight;
 - safe clone/reuse execution;
-- template rebranding, customer module/environment renaming, and local identity files;
+- template rebranding, first local environment renaming, and local identity files;
 - framework-first dependency installation;
 - application `.env` framework and identity linking;
 - dependency install orchestration;

@@ -96,6 +96,11 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.beginnerChoices.application.dockerBackendImageName, 'nodics/acme-backend');
     assert.equal(plan.beginnerChoices.application.companySitePath, '/tmp/nodicsRoot/acme.web');
     assert.equal(plan.beginnerChoices.application.commerceSitePath, '/tmp/nodicsRoot/acme.apparel');
+    assert.equal(plan.initialProvisioning.scope, 'first-local-environment');
+    assert.equal(plan.initialProvisioning.environment, 'acmeLocal');
+    assert.deepEqual(plan.initialProvisioning.modules, ['acmeCore', 'acmeApi', 'acmeInt']);
+    assert.deepEqual(plan.initialProvisioning.sites, ['acme.web', 'acme.apparel']);
+    assert.deepEqual(plan.initialProvisioning.laterExpansion, ['add-environment', 'add-module', 'add-site']);
     assert.deepEqual(plan.accelerator.domains, ['common', 'apparel']);
     assert(plan.repositories.some(repository => repository.name === 'nodics.ai'));
     assert(plan.repositories.some(repository => repository.name === 'acme.startio'));
@@ -143,6 +148,7 @@ test('creates a Docker Local setup plan with Docker preflight', () => {
     assert.equal(plan.expectedUrls.axis, 'http://localhost:4100');
     assert.equal(plan.expectedUrls.companySite, 'http://localhost:4200');
     assert.equal(plan.expectedUrls.commerceSite, 'http://localhost:4300');
+    assert.equal(plan.initialProvisioning.environment, 'telcoPortalDockerLocal');
     assert(!Object.prototype.hasOwnProperty.call(plan.expectedUrls, 'nexus'));
     assert(!Object.prototype.hasOwnProperty.call(plan.expectedUrls, 'agora'));
 });
@@ -412,25 +418,64 @@ test('rebrand rewrites generated topology frontend roots', () => {
     assert(fs.existsSync(path.join(projectPath, 'modules', 'acmeApi')));
     assert(fs.existsSync(path.join(projectPath, 'modules', 'acmeInt')));
     assert(fs.existsSync(path.join(projectPath, 'envs', 'acmeLocal')));
-    assert(fs.existsSync(path.join(projectPath, 'envs', 'acmeDockerLocal')));
+    assert(!fs.existsSync(path.join(projectPath, 'envs', 'acmeDockerLocal')));
+    assert(!fs.existsSync(path.join(projectPath, 'envs', 'kickoffDockerLocal')));
     assert.match(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /'acme\.startio'/);
     assert.match(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /'acmeCore'/);
     assert.doesNotMatch(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /kickoffCore|kickoffLocal/);
+    assert.match(fs.readFileSync(path.join(dataPath, 'content.js'), 'utf8'), /nodics\.kickoff checksum payload/);
+    assert.match(fs.readFileSync(path.join(axisPath, '.env'), 'utf8'), /AXIS_PROJECT_CODE=acme\.startio/);
+    assert.match(fs.readFileSync(path.join(companyPath, '.env'), 'utf8'), /NEXUS_PLATFORM_BASE_URL=http:\/\/localhost:4300/);
+    assert.match(fs.readFileSync(path.join(commercePath, '.env'), 'utf8'), /AGORA_SOLUTION=apparel/);
+});
+
+test('docker mode first run keeps only the Docker Local environment', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-docker-env-'));
+    const projectPath = path.join(workspace, 'acme.startio');
+    const localPath = path.join(projectPath, 'envs', 'kickoffLocal');
+    const dockerPath = path.join(projectPath, 'envs', 'kickoffDockerLocal', 'docker');
+    fs.mkdirSync(localPath, { recursive: true });
+    fs.mkdirSync(dockerPath, { recursive: true });
+    fs.writeFileSync(path.join(localPath, 'marker.txt'), 'kickoffLocal\n');
+    fs.writeFileSync(path.join(dockerPath, 'backend.Dockerfile'),
+        'ENV=kickoffDockerLocal\nCOPY nodics.kickoff /workspace/nodics.kickoff\n');
+    fs.writeFileSync(path.join(dockerPath, 'compose.yaml'), [
+        'name: nodics-kickoff-docker-local',
+        'services:',
+        '  axis:',
+        '    build: { args: { FRONTEND_PROJECT: nodics.exp/nodics.axis } }',
+        '  nexus:',
+        '    build: { args: { FRONTEND_PROJECT: nodics.exp/nodics.nexus } }',
+        'networks:',
+        '  public: { name: nodics-kickoff-docker-local-public }',
+        ''
+    ].join('\n'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--mode=docker',
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--company-site-name=acme.web',
+        '--commerce-site-name=acme.apparel',
+        '--accelerator=apparel'
+    ]);
+
+    installer.renameProjectIdentityPaths(projectPath, options);
+    installer.rebrandProjectFiles(projectPath, options);
+
+    assert(!fs.existsSync(path.join(projectPath, 'envs', 'kickoffLocal')));
+    assert(!fs.existsSync(path.join(projectPath, 'envs', 'acmeLocal')));
+    assert(fs.existsSync(path.join(projectPath, 'envs', 'acmeDockerLocal')));
     const dockerFile = fs.readFileSync(path.join(projectPath, 'envs', 'acmeDockerLocal', 'docker', 'backend.Dockerfile'), 'utf8');
     assert.match(dockerFile, /ENV=acmeDockerLocal/);
     assert.match(dockerFile, /COPY acme\.startio \/workspace\/acme\.startio/);
     assert.doesNotMatch(dockerFile, /kickoffDockerLocal|nodics\.kickoff/);
     const dockerCompose = fs.readFileSync(path.join(projectPath, 'envs', 'acmeDockerLocal', 'docker', 'compose.yaml'), 'utf8');
     assert.match(dockerCompose, /name: nodics-acme-docker-local/);
-    assert.match(dockerCompose, /image: nodics\/acme-backend:docker-local/);
     assert.match(dockerCompose, /FRONTEND_PROJECT: nodics\.axis/);
     assert.match(dockerCompose, /FRONTEND_PROJECT: acme\.web/);
     assert.match(dockerCompose, /nodics-acme-docker-local-public/);
     assert.doesNotMatch(dockerCompose, /nodics-kickoff-docker-local|nodics\.exp\/nodics\.(axis|nexus)/);
-    assert.match(fs.readFileSync(path.join(dataPath, 'content.js'), 'utf8'), /nodics\.kickoff checksum payload/);
-    assert.match(fs.readFileSync(path.join(axisPath, '.env'), 'utf8'), /AXIS_PROJECT_CODE=acme\.startio/);
-    assert.match(fs.readFileSync(path.join(companyPath, '.env'), 'utf8'), /NEXUS_PLATFORM_BASE_URL=http:\/\/localhost:4300/);
-    assert.match(fs.readFileSync(path.join(commercePath, '.env'), 'utf8'), /AGORA_SOLUTION=apparel/);
 });
 
 test('resumed evidence refreshes requested execution context', async () => {

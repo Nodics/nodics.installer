@@ -137,9 +137,28 @@ For generated application projects, verify:
 - backend project identity comes from `--application-name`;
 - Axis remains `nodics.axis`;
 - company and commerce sites use customer names;
+- first execution creates only the selected local environment;
 - Docker compose project and backend image names use the customer slug;
 - no user-facing generated identity points to Kickoff, Agora, or Nexus unless
   the file is intentionally documenting template origin.
+
+## Expansion Governance
+
+First-machine setup is intentionally small. It creates the named customer
+project, selected first local environment, selected standard applications, and
+selected starter sites only.
+
+Later customer growth must be handled through explicit expansion actions:
+
+- `add-environment` for QA, staging, production simulation, or another local
+  runtime variant;
+- `add-module` for a new customer-owned backend module;
+- `add-site` for another company or commerce site such as electronics or telco.
+
+Expansion actions must read existing setup evidence, preserve current project
+identity, refuse dirty repositories, update project contracts deterministically,
+and write new evidence. They must not rerun first-machine bootstrap or rename
+existing customer repositories.
 
 ## Security Review
 

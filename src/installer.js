@@ -19,7 +19,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 
 const VERSION = '0.7.0';
-const REBRAND_STAGE_VERSION = VERSION + ':project-runtime-identity-v5';
+const REBRAND_STAGE_VERSION = VERSION + ':project-runtime-identity-v6';
 const START_STAGE_VERSION = VERSION + ':detached-topology-start-v1';
 const VALID_JOURNEYS = new Set(['reference', 'project']);
 const VALID_MODES = new Set(['node', 'docker']);
@@ -682,6 +682,28 @@ const installer = {
         };
     },
 
+    initialProvisioning: function (options) {
+        return {
+            scope: 'first-local-environment',
+            environment: options.mode === 'docker' ?
+                options.application.dockerLocalEnvironmentName : options.application.localEnvironmentName,
+            modules: [
+                options.application.coreModuleName,
+                options.application.apiModuleName,
+                options.application.integrationModuleName
+            ],
+            sites: [
+                options.companySite ? options.application.companySiteName : null,
+                options.commerceSite ? options.application.commerceSiteName : null
+            ].filter(Boolean),
+            laterExpansion: [
+                'add-environment',
+                'add-module',
+                'add-site'
+            ]
+        };
+    },
+
     createSetupPlan: function (options) {
         const validation = this.validateOptions(options);
         if (!validation.valid) {
@@ -728,6 +750,7 @@ const installer = {
                 dataPacks: this.applicationDataPacks(options, profile),
                 gates: profile.gates
             },
+            initialProvisioning: this.initialProvisioning(options),
             prerequisites: [
                 { code: 'node', command: 'node --version', required: true },
                 { code: 'npm', command: 'npm --version', required: true },
@@ -742,6 +765,7 @@ const installer = {
                 'Inspect machine prerequisites and busy ports.',
                 'Resolve and protect the selected workspace.',
                 'Download or reuse required Nodics repositories.',
+                'Create only the selected first local environment for this application.',
                 'Configure application project framework links.',
                 'Install dependencies in framework, project, and selected frontend apps.',
                 'Run local preflight before starting services.',
@@ -784,6 +808,12 @@ const installer = {
         lines.push('', 'Accelerator:');
         lines.push('- Domains: ' + plan.accelerator.domains.join(', '));
         lines.push('- Data packs: ' + plan.accelerator.dataPacks.join(', '));
+        lines.push('', 'Initial provisioning:');
+        lines.push('- Environment: ' + plan.initialProvisioning.environment);
+        lines.push('- Modules: ' + plan.initialProvisioning.modules.join(', '));
+        lines.push('- Sites: ' + (plan.initialProvisioning.sites.length ?
+            plan.initialProvisioning.sites.join(', ') : 'none'));
+        lines.push('- Later expansion actions: ' + plan.initialProvisioning.laterExpansion.join(', '));
         lines.push('', 'Repositories:');
         plan.repositories.forEach(repository => {
             lines.push('- ' + repository.name + ' -> ' + repository.targetPath);
@@ -1151,6 +1181,14 @@ const installer = {
         return [targetPath];
     },
 
+    removePathIfExists: function (targetPath) {
+        if (!fs.existsSync(targetPath)) {
+            return [];
+        }
+        fs.rmSync(targetPath, { recursive: true, force: true });
+        return [targetPath];
+    },
+
     renameProjectIdentityPaths: function (projectPath, options) {
         const modulesPath = path.join(projectPath, 'modules');
         const envsPath = path.join(projectPath, 'envs');
@@ -1162,12 +1200,15 @@ const installer = {
         ].forEach(([sourceName, targetName]) => {
             renamed.push(...this.renamePathIfExists(path.join(modulesPath, sourceName), path.join(modulesPath, targetName)));
         });
-        [
-            ['kickoffLocal', options.application.localEnvironmentName],
-            ['kickoffDockerLocal', options.application.dockerLocalEnvironmentName]
-        ].forEach(([sourceName, targetName]) => {
-            renamed.push(...this.renamePathIfExists(path.join(envsPath, sourceName), path.join(envsPath, targetName)));
-        });
+        if (options.mode === 'docker') {
+            renamed.push(...this.renamePathIfExists(path.join(envsPath, 'kickoffDockerLocal'),
+                path.join(envsPath, options.application.dockerLocalEnvironmentName)));
+            renamed.push(...this.removePathIfExists(path.join(envsPath, 'kickoffLocal')));
+        } else {
+            renamed.push(...this.renamePathIfExists(path.join(envsPath, 'kickoffLocal'),
+                path.join(envsPath, options.application.localEnvironmentName)));
+            renamed.push(...this.removePathIfExists(path.join(envsPath, 'kickoffDockerLocal')));
+        }
         const servicePath = path.join(modulesPath, options.application.integrationModuleName, 'src', 'service');
         renamed.push(...this.renamePathIfExists(
             path.join(servicePath, 'defaultKickoffEditorialProcessAdapterService.js'),
