@@ -19,7 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 
-const VERSION = '0.7.1';
+const VERSION = '0.7.2';
 const REBRAND_STAGE_VERSION = VERSION + ':project-runtime-identity-v6';
 const START_STAGE_VERSION = VERSION + ':detached-topology-start-v1';
 const VENDOR_BOUNDARY_STAGE_VERSION = VERSION + ':vendor-boundary-v1';
@@ -2646,7 +2646,9 @@ const installer = {
                     }
                     return;
                 }
-                if (entry.isFile() && (rebrandableExtensions.has(path.extname(entry.name)) || fileNames.has(entry.name))) {
+                if (entry.isFile() && entry.name !== 'nodics.project.json' &&
+                    entry.name !== 'nodics.solution.json' &&
+                    (rebrandableExtensions.has(path.extname(entry.name)) || fileNames.has(entry.name))) {
                     files.push(entryPath);
                 }
             });
@@ -2915,68 +2917,8 @@ const installer = {
     },
 
     updateProjectTopologyIdentity: function (projectPath, options) {
-        const projectJsonPath = path.join(projectPath, 'nodics.project.json');
-        if (!fs.existsSync(projectJsonPath)) {
-            return [];
-        }
-        const projectJson = this.readJsonFile(projectJsonPath);
-        const frontends = projectJson.topology &&
-            projectJson.topology.groups &&
-            Array.isArray(projectJson.topology.groups.frontends) ?
-            projectJson.topology.groups.frontends : [];
-        const frontendTargets = {
-            axis: {
-                label: 'Axis',
-                cwd: '{workspaceRoot}/' + path.basename(options.application.axisPath),
-                ...this.axisRuntimeCommand(options)
-            },
-            nexus: {
-                code: 'companySite',
-                label: options.application.companySiteTitle,
-                cwd: '{workspaceRoot}/' + options.application.companySiteName
-            },
-            agora: {
-                code: 'commerceSite',
-                label: options.application.commerceSiteTitle,
-                cwd: '{workspaceRoot}/' + options.application.commerceSiteName
-            }
-        };
-        let changed = false;
-        frontends.forEach(frontend => {
-            const target = frontendTargets[frontend.code];
-            if (!target) {
-                return;
-            }
-            Object.entries(target).forEach(([key, value]) => {
-                if (frontend[key] !== value) {
-                    frontend[key] = value;
-                    changed = true;
-                }
-            });
-        });
-        if (projectJson.acceptance && projectJson.acceptance.urls) {
-            const acceptanceUrls = projectJson.acceptance.urls;
-            if (options.companySite && acceptanceUrls.companySite === undefined && acceptanceUrls.nexus !== undefined) {
-                acceptanceUrls.companySite = acceptanceUrls.nexus;
-                delete acceptanceUrls.nexus;
-                changed = true;
-            }
-            if (options.commerceSite && acceptanceUrls.commerceSite === undefined && acceptanceUrls.agora !== undefined) {
-                acceptanceUrls.commerceSite = acceptanceUrls.agora;
-                delete acceptanceUrls.agora;
-                changed = true;
-            }
-        }
-        projectJson.acceptance = projectJson.acceptance || {};
-        const localBootstrap = this.localBootstrapAcceptanceCapabilities(options);
-        if (JSON.stringify(projectJson.acceptance.localBootstrap) !== JSON.stringify(localBootstrap)) {
-            projectJson.acceptance.localBootstrap = localBootstrap;
-            changed = true;
-        }
-        if (changed) {
-            this.writeJsonFile(projectJsonPath, projectJson);
-            return [projectJsonPath];
-        }
+        void projectPath;
+        void options;
         return [];
     },
 
@@ -3311,17 +3253,6 @@ const installer = {
         return fs.existsSync(projectJsonPath) ? this.readJsonFile(projectJsonPath) : null;
     },
 
-    updateProjectDescriptor: function (options, updater) {
-        const projectJsonPath = path.join(options.application.projectPath, 'nodics.project.json');
-        const projectJson = fs.existsSync(projectJsonPath) ? this.readJsonFile(projectJsonPath) : {};
-        const changed = updater(projectJson);
-        if (!changed) {
-            return [];
-        }
-        this.writeJsonFile(projectJsonPath, projectJson);
-        return [projectJsonPath];
-    },
-
     appendUniqueValue: function (values, value) {
         const nextValues = Array.isArray(values) ? values : [];
         if (!nextValues.includes(value)) {
@@ -3598,14 +3529,6 @@ const installer = {
         return nextIndex.toFixed(2);
     },
 
-    updateProjectExpansionMetadata: function (options, key, value) {
-        return this.updateProjectDescriptor(options, projectJson => {
-            projectJson.expansions = projectJson.expansions || {};
-            projectJson.expansions[key] = projectJson.expansions[key] || [];
-            return this.appendUniqueValue(projectJson.expansions[key], value);
-        });
-    },
-
     writeExpansionReadmeIfMissing: function (filePath, lines) {
         if (fs.existsSync(filePath)) {
             return [];
@@ -3722,12 +3645,6 @@ const installer = {
             .filter(filePath => this.replaceTextInFile(filePath, [[sourceEnvironment, options.environmentName]])));
         changed.push(...this.reindexEnvironmentModules(targetPath, options));
         changed.push(...this.writeEnvironmentGuidance(targetPath, options, sourceEnvironment));
-        changed.push(...this.updateProjectExpansionMetadata(options, 'environments', {
-            name: options.environmentName,
-            source: sourceEnvironment,
-            mode: options.mode,
-            environmentProfile: options.environmentProfile
-        }));
         const evidencePath = this.writeExpansionEvidence(options, {
             action: 'add-environment',
             environmentName: options.environmentName,
@@ -3832,15 +3749,11 @@ const installer = {
             path.join(modulePath, 'config', 'postscripts.js')
         ];
         changed.push(...this.modulePresetScaffold(modulePath, options, preset));
-        changed.push(...this.updateProjectExpansionMetadata(options, 'modules', {
-            name: options.moduleName,
-            kind: 'customer-module',
-            preset: options.modulePreset
-        }));
         const relativeChanged = Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath));
         const evidencePath = this.writeExpansionEvidence(options, {
             action: 'add-module',
             moduleName: options.moduleName,
+            modulePreset: options.modulePreset,
             changed: relativeChanged
         });
         return {
@@ -3879,7 +3792,7 @@ const installer = {
         return [targetPath];
     },
 
-    nextFrontendPort: function (projectJson) {
+    nextFrontendPort: function (projectJson, options) {
         const frontends = projectJson &&
             projectJson.topology &&
             projectJson.topology.groups &&
@@ -3888,35 +3801,21 @@ const installer = {
         const ports = frontends
             .map(frontend => Number(frontend.port))
             .filter(port => Number.isInteger(port) && port > 0);
-        return ports.length ? Math.max(...ports) + 100 : 3100;
-    },
-
-    addFrontendToProjectDescriptor: function (options, port) {
-        const siteCode = this.toLowerCamelIdentifier(options.siteName) + 'Site';
-        const label = this.toDisplayTitle(options.siteName, options.siteName);
-        return this.updateProjectDescriptor(options, projectJson => {
-            projectJson.topology = projectJson.topology || {};
-            projectJson.topology.groups = projectJson.topology.groups || {};
-            projectJson.topology.groups.frontends = projectJson.topology.groups.frontends || [];
-            const frontends = projectJson.topology.groups.frontends;
-            if (frontends.some(frontend => frontend.cwd === '{workspaceRoot}/' + options.siteName ||
-                frontend.code === siteCode)) {
-                return false;
-            }
-            frontends.push({
-                code: siteCode,
-                label,
-                type: options.siteType + '-site',
-                command: 'npm',
-                args: options.siteType === 'commerce' ?
-                    ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port)] :
-                    ['run', 'dev'],
-                cwd: '{workspaceRoot}/' + options.siteName,
-                port,
-                readyPath: '/'
+        if (options) {
+            const expectedUrls = this.expectedUrls(options);
+            ['axis', 'companySite', 'commerceSite'].forEach(code => {
+                const url = expectedUrls[code];
+                if (!url) {
+                    return;
+                }
+                const parsed = new URL(url);
+                const port = Number(parsed.port);
+                if (Number.isInteger(port) && port > 0) {
+                    ports.push(port);
+                }
             });
-            return true;
-        });
+        }
+        return ports.length ? Math.max(...ports) + 100 : 3100;
     },
 
     appendProjectEnvRoot: function (options, sitePath) {
@@ -3939,7 +3838,7 @@ const installer = {
         const targetPath = path.join(options.workspace, options.siteName);
         const changed = this.prepareExpansionSiteRepository(options);
         const title = this.toDisplayTitle(options.siteName, options.siteName);
-        const frontendPort = this.nextFrontendPort(this.readProjectDescriptor(options));
+        const frontendPort = this.nextFrontendPort(this.readProjectDescriptor(options), options);
         changed.push(...this.updatePackageName(targetPath, options.siteName, title));
         changed.push(this.writeInstallerIdentity(targetPath, {
             kind: options.siteType + '-site',
@@ -3981,14 +3880,7 @@ const installer = {
                 NEXUS_STRICT_PORT: 'true'
             }, path.join(targetPath, '.env.example')));
         }
-        changed.push(...this.addFrontendToProjectDescriptor(options, frontendPort));
         const install = this.packageInstallCommand(targetPath, options);
-        changed.push(...this.updateProjectExpansionMetadata(options, 'sites', {
-            name: options.siteName,
-            type: options.siteType,
-            preset: options.sitePreset,
-            accelerator: options.siteType === 'commerce' ? options.accelerator : undefined
-        }));
         changed.push(this.appendProjectEnvRoot(options, targetPath));
         const relativeChanged = Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath));
         const evidencePath = this.writeExpansionEvidence(options, {
@@ -3996,6 +3888,7 @@ const installer = {
             siteName: options.siteName,
             siteType: options.siteType,
             sitePreset: options.sitePreset,
+            frontendPort,
             changed: relativeChanged
         });
         return {
@@ -4039,6 +3932,17 @@ const installer = {
         const topology = fs.existsSync(options.application.projectPath) ? this.readTopologyStatus(options) : null;
         const projectDescriptor = this.readProjectDescriptor(options);
         const structureAudit = this.auditGeneratedProjectStructure(options);
+        const logDirectory = this.resolveTopologyStateDirectory(options, projectDescriptor);
+        const projectStatus = {
+            projectCode: options.application.code,
+            displayName: options.application.name,
+            environment: this.initialProvisioning(options).environment,
+            stateDirectory: path.relative(options.application.projectPath, logDirectory)
+        };
+        if (projectDescriptor && projectDescriptor.topology) {
+            projectStatus.environment = projectDescriptor.topology.environment || projectStatus.environment;
+            projectStatus.stateDirectory = projectDescriptor.topology.stateDirectory || projectStatus.stateDirectory;
+        }
         let vendorBoundary;
         try {
             vendorBoundary = this.vendorBoundaryStatus(options);
@@ -4069,12 +3973,7 @@ const installer = {
             } : { exists: false },
             repositories: plan.repositories.map(repository => this.repositoryStatus(repository)),
             topology: topology ? topology.status : null,
-            project: projectDescriptor ? {
-                projectCode: projectDescriptor.projectCode,
-                displayName: projectDescriptor.displayName,
-                environment: projectDescriptor.topology && projectDescriptor.topology.environment,
-                stateDirectory: projectDescriptor.topology && projectDescriptor.topology.stateDirectory
-            } : null,
+            project: projectStatus,
             structureAudit,
             aiOnboarding: this.aiOnboardingStatus(options),
             vendorBoundary,
@@ -4083,7 +3982,7 @@ const installer = {
             publishingReadiness: this.publishingReadiness(options),
             mediaAssetReadiness: this.mediaAssetReadiness(options),
             expectedUrls: plan.expectedUrls,
-            logDirectory: this.resolveTopologyStateDirectory(options, projectDescriptor)
+            logDirectory
         };
     },
 
@@ -4298,7 +4197,6 @@ const installer = {
         const required = [
             'package.json',
             'nodics.js',
-            'nodics.project.json',
             'AGENTS.md',
             'README.md',
             'llm/contracts/README.md',
@@ -4362,20 +4260,18 @@ const installer = {
             const root = path.join(options.workspace, entry.name);
             const identityPath = path.join(root, '.nodics-installer-identity.json');
             const lockPath = path.join(root, '.nodics-installer-lock.json');
-            const descriptorPath = path.join(root, 'nodics.project.json');
             const identity = fs.existsSync(identityPath) ? this.readJsonFile(identityPath) : null;
             const lock = fs.existsSync(lockPath) ? this.readJsonFile(lockPath) : null;
-            const descriptor = fs.existsSync(descriptorPath) ? this.readJsonFile(descriptorPath) : null;
             return {
                 name: entry.name,
                 path: root,
-                kind: identity && identity.kind || (descriptor ? 'project' : 'repository'),
+                kind: identity && identity.kind || 'repository',
                 generated: Boolean(identity),
                 vendorOwned: VENDOR_OWNED_REPOSITORIES.includes(entry.name),
                 applicationName: identity && identity.applicationName,
                 siteName: identity && identity.siteName,
-                projectCode: descriptor && descriptor.projectCode,
-                environment: descriptor && descriptor.topology && descriptor.topology.environment,
+                projectCode: identity && (identity.projectName || identity.applicationCode),
+                environment: identity && identity.localEnvironmentName,
                 installerVersion: lock && lock.installer && lock.installer.version
             };
         });
@@ -4391,8 +4287,6 @@ const installer = {
     upgradeCheck: function (plan, options) {
         const lockPath = path.join(options.application.projectPath, '.nodics-installer-lock.json');
         const lock = fs.existsSync(lockPath) ? this.readJsonFile(lockPath) : null;
-        const expectedCapabilities = this.localBootstrapAcceptanceCapabilities(options);
-        const descriptor = this.readProjectDescriptor(options);
         const findings = [];
         if (!lock) {
             findings.push({
@@ -4419,13 +4313,6 @@ const installer = {
                     fix: 'Use the original accelerator or intentionally add a new site/module through expansion commands.'
                 });
             }
-        }
-        if (descriptor && JSON.stringify(descriptor.acceptance && descriptor.acceptance.localBootstrap) !== JSON.stringify(expectedCapabilities)) {
-            findings.push({
-                code: 'local-bootstrap-capability-drift',
-                severity: 'warning',
-                fix: 'Run --action=repair --yes to align acceptance.localBootstrap with current installer rules.'
-            });
         }
         return {
             contractVersion: JSON_RESULT_CONTRACTS.upgradeCheck,
@@ -4711,7 +4598,11 @@ const installer = {
     resolveTopologyStateDirectory: function (options, projectDescriptor) {
         const descriptor = projectDescriptor || this.readProjectDescriptor(options);
         const stateDirectory = descriptor && descriptor.topology && descriptor.topology.stateDirectory;
-        return stateDirectory ? path.join(options.application.projectPath, stateDirectory) : null;
+        if (stateDirectory) {
+            return path.join(options.application.projectPath, stateDirectory);
+        }
+        return path.join(options.application.projectPath, 'envs',
+            this.initialProvisioning(options).environment, 'generated', 'local-topology');
     },
 
     collectLogFiles: function (options) {
@@ -4902,10 +4793,13 @@ const installer = {
         if (stateDirectory) {
             targets.push(stateDirectory);
         }
-        const dockerGenerated = projectDescriptor &&
+        const descriptorDockerGenerated = projectDescriptor &&
             projectDescriptor.containerEnvironments &&
             projectDescriptor.containerEnvironments.dockerLocal &&
-            projectDescriptor.containerEnvironments.dockerLocal.generatedDirectory;
+            projectDescriptor.containerEnvironments.dockerLocal.generatedDirectory ||
+            null;
+        const dockerGenerated = descriptorDockerGenerated ||
+            path.join('envs', options.application.dockerLocalEnvironmentName, 'generated');
         if (dockerGenerated) {
             targets.push(path.join(options.application.projectPath, dockerGenerated));
         }

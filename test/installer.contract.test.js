@@ -26,7 +26,7 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
     const nodicsRoot = require('../nodics');
     assert.equal(packageJson.name, '@nodics/installer');
     assert.equal(packageJson.main, 'nodics.js');
-    assert.equal(packageJson.version, '0.7.1');
+    assert.equal(packageJson.version, '0.7.2');
     assert.equal(packageJson.repository.url, 'git+https://github.com/Nodics/nodics.installer.git');
     assert.equal(packageJson.publishConfig.access, 'public');
     assert.equal(packageJson.scripts['publish:check'], 'npm test && npm run pack:check');
@@ -101,7 +101,7 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.writePerformed, false);
     assert.equal(plan.executionSupported, true);
     assert.equal(plan.installer.packageName, '@nodics/installer');
-    assert.equal(plan.installer.version, '0.7.1');
+    assert.equal(plan.installer.version, '0.7.2');
     assert.equal(plan.installer.bootstrapCommand, 'npx github:Nodics/nodics.installer');
     assert.equal(plan.beginnerChoices.environmentProfile.code, 'local-dev');
     assert.equal(plan.beginnerChoices.acceptanceProfile.code, 'standard');
@@ -518,6 +518,7 @@ test('rebrand rewrites generated topology frontend roots', () => {
             }
         }
     }, null, 2));
+    const projectDescriptorBefore = fs.readFileSync(path.join(projectPath, 'nodics.project.json'), 'utf8');
     ['kickoffCore', 'kickoffApi', 'kickoffInt'].forEach(moduleName => {
         fs.mkdirSync(path.join(projectPath, 'modules', moduleName), { recursive: true });
         fs.writeFileSync(path.join(projectPath, 'modules', moduleName, 'package.json'), JSON.stringify({ name: moduleName }, null, 2));
@@ -558,46 +559,7 @@ test('rebrand rewrites generated topology frontend roots', () => {
     installer.updateProjectTopologyIdentity(projectPath, options);
     installer.rebrandProjectFiles(projectPath, options);
     installer.configureFrontendEnvironmentFiles(options);
-    const projectJson = JSON.parse(fs.readFileSync(path.join(projectPath, 'nodics.project.json'), 'utf8'));
-    assert.deepEqual(projectJson.acceptance.localBootstrap.documentationPacks.map(pack => pack.code), [
-        'nodicsDocumentation',
-        'axisDocumentation'
-    ]);
-    assert.equal(projectJson.acceptance.localBootstrap.axisSmoke.expectDocumentation, false);
-    assert(!projectJson.acceptance.localBootstrap.axisSmoke.routes.includes('/docs/nodics-kickoff'));
-    assert.deepEqual(projectJson.topology.groups.frontends.map(frontend => ({
-        code: frontend.code,
-        label: frontend.label,
-        cwd: frontend.cwd,
-        command: frontend.command,
-        args: frontend.args,
-        env: frontend.env
-    })), [
-        {
-            code: 'axis',
-            label: 'Axis',
-            cwd: '{workspaceRoot}/nodics.axis',
-            command: 'npm',
-            args: ['run', 'dev'],
-            env: {
-                AXIS_BACKOFFICE_BASE_URL: 'http://localhost:4300',
-                AXIS_ENTERPRISE_CODE: 'default',
-                AXIS_PROJECT_CODE: 'acme.startio',
-                AXIS_CLIENT_CONTRACT_VERSION: '0',
-                AXIS_REQUEST_TIMEOUT_MS: '10000',
-                AXIS_BROWSER_SESSION_CSRF_COOKIE_NAME: 'nodics_axis_csrf',
-                AXIS_ASSISTANT_MAXIMUM_EVENT_BYTES: '65536',
-                AXIS_ASSISTANT_RECONNECT_WINDOW_MS: '120000',
-                AXIS_ASSISTANT_IDLE_TIMEOUT_MS: '45000',
-                AXIS_DEV_HOST: '0.0.0.0',
-                AXIS_DEV_PORT: '3100',
-                AXIS_STRICT_PORT: 'true',
-                AXIS_BUILD_SOURCEMAP: 'true'
-            }
-        },
-        { code: 'companySite', label: 'Acme Web', cwd: '{workspaceRoot}/acme.web', command: undefined, args: undefined, env: undefined },
-        { code: 'commerceSite', label: 'Acme Apparel', cwd: '{workspaceRoot}/acme.apparel', command: undefined, args: undefined, env: undefined }
-    ]);
+    assert.equal(fs.readFileSync(path.join(projectPath, 'nodics.project.json'), 'utf8'), projectDescriptorBefore);
     const renamedServerConfigPath = path.join(projectPath, 'envs', 'acmeLocal', 'platformServer', 'config');
     assert(!fs.existsSync(path.join(projectPath, 'modules', 'kickoffCore')));
     assert(!fs.existsSync(path.join(projectPath, 'modules', 'kickoffApi')));
@@ -850,7 +812,7 @@ test('start execution rechecks live topology even when evidence has a prior star
     const evidence = JSON.parse(fs.readFileSync(plan.evidencePath, 'utf8'));
     const startSteps = evidence.steps.filter(step => step.code === 'start');
     assert.equal(startSteps.length, 1);
-    assert.equal(startSteps[0].stageVersion, '0.7.1:detached-topology-start-v1');
+    assert.equal(startSteps[0].stageVersion, '0.7.2:detached-topology-start-v1');
     assert.equal(startSteps[0].result.status, 'passed');
 });
 
@@ -1009,7 +971,7 @@ test('version action exposes supported actions without requiring workspace valid
     const result = installer.versionInfo();
     assert.equal(result.operation, 'local-installer-version');
     assert.equal(result.packageName, '@nodics/installer');
-    assert.equal(result.version, '0.7.1');
+    assert.equal(result.version, '0.7.2');
     assert(result.actions.includes('status'));
     assert(result.actions.includes('repair'));
     assert(result.actions.includes('add-environment'));
@@ -1153,12 +1115,6 @@ test('logs action reads topology log excerpts by runtime', () => {
     ]);
     const stateDirectory = path.join(options.application.projectPath, 'envs', 'acmeLocal', 'generated', 'local-topology');
     fs.mkdirSync(stateDirectory, { recursive: true });
-    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
-        topology: {
-            environment: 'acmeLocal',
-            stateDirectory: 'envs/acmeLocal/generated/local-topology'
-        }
-    });
     fs.writeFileSync(path.join(stateDirectory, 'platform.log'), 'one\ntwo\nthree\n');
     fs.writeFileSync(path.join(stateDirectory, 'commerce.log'), 'ignored\n');
 
@@ -1184,9 +1140,6 @@ test('logs action groups beginner failure signals', () => {
     ]);
     const stateDirectory = path.join(options.application.projectPath, 'envs', 'acmeLocal', 'generated', 'local-topology');
     fs.mkdirSync(stateDirectory, { recursive: true });
-    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
-        topology: { environment: 'acmeLocal', stateDirectory: 'envs/acmeLocal/generated/local-topology' }
-    });
     fs.writeFileSync(path.join(stateDirectory, 'platform.log'), 'Error: listen EADDRINUSE: address already in use\n');
     const logs = installer.logsStatus(options);
     assert.match(logs.explain.summary, /port-conflict/);
@@ -1206,17 +1159,6 @@ test('clean removes generated runtime directories only when topology is stopped'
     const dockerGenerated = path.join(options.application.projectPath, 'envs', 'acmeDockerLocal', 'generated');
     fs.mkdirSync(stateDirectory, { recursive: true });
     fs.mkdirSync(dockerGenerated, { recursive: true });
-    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
-        topology: {
-            environment: 'acmeLocal',
-            stateDirectory: 'envs/acmeLocal/generated/local-topology'
-        },
-        containerEnvironments: {
-            dockerLocal: {
-                generatedDirectory: 'envs/acmeDockerLocal/generated'
-            }
-        }
-    });
     const service = {
         ...installer,
         readTopologyStatus: () => ({
@@ -1269,14 +1211,14 @@ test('inventory upgrade-check support-bundle and cleanup use generated metadata 
     fs.mkdirSync(options.application.companySitePath, { recursive: true });
     fs.mkdirSync(options.application.commerceSitePath, { recursive: true });
     fs.mkdirSync(options.application.axisPath, { recursive: true });
-    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
-        projectCode: 'acme.startio',
-        topology: { environment: 'acmeLocal', stateDirectory: 'envs/acmeLocal/generated/local-topology' },
-        acceptance: { localBootstrap: installer.localBootstrapAcceptanceCapabilities(options) }
-    });
     installer.writeJsonFile(path.join(options.application.projectPath, '.nodics-installer-lock.json'),
         installer.installerLock(plan, options));
-    installer.writeJsonFile(path.join(options.application.projectPath, '.nodics-installer-identity.json'), { kind: 'customer-project' });
+    installer.writeJsonFile(path.join(options.application.projectPath, '.nodics-installer-identity.json'), {
+        kind: 'customer-project',
+        applicationCode: 'acme',
+        projectName: 'acme.startio',
+        localEnvironmentName: 'acmeLocal'
+    });
     installer.writeJsonFile(path.join(options.application.companySitePath, '.nodics-installer-identity.json'), { kind: 'company-site' });
     installer.writeJsonFile(path.join(options.application.commerceSitePath, '.nodics-installer-identity.json'), { kind: 'commerce-site' });
     installer.writeEvidence(plan.evidencePath, installer.createEvidence(plan, options));
@@ -1362,11 +1304,6 @@ test('workspace manifest diff data publishing health and vendor update actions a
     [options.application.projectPath, options.application.companySitePath, options.application.commerceSitePath,
         options.application.axisPath, path.join(workspace, 'nodics.ai')].forEach(root => {
         fs.mkdirSync(root, { recursive: true });
-    });
-    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
-        projectCode: 'acme.startio',
-        topology: { environment: 'acmeLocal', stateDirectory: 'envs/acmeLocal/generated/local-topology' },
-        acceptance: { localBootstrap: installer.localBootstrapAcceptanceCapabilities(options) }
     });
     installer.writeJsonFile(path.join(options.application.projectPath, 'package.json'), {
         scripts: {
@@ -1486,15 +1423,12 @@ test('add-environment copies one requested environment and writes expansion evid
     assert(fs.existsSync(result.backup.manifestPath));
     assert.equal(installer.readJsonFile(path.join(options.application.projectPath, 'envs', 'acmeQa', 'package.json')).index, '1002.10');
     assert.equal(installer.readJsonFile(path.join(options.application.projectPath, 'envs', 'acmeQa', 'platformServer', 'package.json')).index, '1002.11');
-    const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
-    assert.deepEqual(descriptor.expansions.environments[0], {
-        name: 'acmeQa',
-        source: 'acmeLocal',
-        mode: 'node',
-        environmentProfile: 'local-dev'
-    });
+    assert(!fs.existsSync(path.join(options.application.projectPath, 'nodics.project.json')));
     const evidence = installer.readEvidence(result.evidencePath);
     assert.equal(evidence.entries[0].action, 'add-environment');
+    assert.equal(evidence.entries[0].environmentName, 'acmeQa');
+    assert.equal(evidence.entries[0].fromEnvironment, 'acmeLocal');
+    assert.equal(evidence.entries[0].environmentProfile, 'local-dev');
 });
 
 test('add-module creates a module-shaped customer backend module', () => {
@@ -1535,12 +1469,11 @@ test('add-module creates a module-shaped customer backend module', () => {
     assert.equal(packageJson.nodics.presetSummary, 'General customer capability module.');
     assert.match(fs.readFileSync(path.join(modulePath, 'llm', 'contracts', 'README.md'), 'utf8'),
         /wider architecture documentation belongs in Nodics documentation/);
-    const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
-    assert.deepEqual(descriptor.expansions.modules[0], {
-        name: 'acmeLoyalty',
-        kind: 'customer-module',
-        preset: 'capability'
-    });
+    assert(!fs.existsSync(path.join(options.application.projectPath, 'nodics.project.json')));
+    const evidence = installer.readEvidence(result.evidencePath);
+    assert.equal(evidence.entries[0].action, 'add-module');
+    assert.equal(evidence.entries[0].moduleName, 'acmeLoyalty');
+    assert.equal(evidence.entries[0].modulePreset, 'capability');
 });
 
 test('add-site creates one requested customer site from template and records topology metadata', () => {
@@ -1558,15 +1491,6 @@ test('add-site creates one requested customer site from template and records top
     ]);
     const plan = installer.createSetupPlan(options);
     fs.mkdirSync(options.application.projectPath, { recursive: true });
-    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
-        topology: {
-            groups: {
-                frontends: [
-                    { code: 'axis', label: 'Axis', cwd: '{workspaceRoot}/nodics.axis', port: 3100 }
-                ]
-            }
-        }
-    });
     fs.writeFileSync(path.join(options.application.projectPath, '.env.example'), 'NODICS_FRAMEWORK_ROOT=../nodics.ai\n');
     const templatePath = path.join(workspace, 'nodics.agora');
     fs.mkdirSync(templatePath, { recursive: true });
@@ -1585,7 +1509,7 @@ test('add-site creates one requested customer site from template and records top
     assert.equal(result.siteName, 'acme.electronics');
     assert.equal(result.siteType, 'commerce');
     assert.equal(result.sitePreset, 'electronics');
-    assert.equal(result.frontendPort, 3200);
+    assert.equal(result.frontendPort, 3400);
     assert.equal(result.install.status, 'passed');
     assert(fs.existsSync(result.backup.manifestPath));
     const sitePath = path.join(workspace, 'acme.electronics');
@@ -1593,21 +1517,15 @@ test('add-site creates one requested customer site from template and records top
     assert.match(fs.readFileSync(path.join(sitePath, 'README.md'), 'utf8'), /Acme Electronics/);
     assert.match(fs.readFileSync(path.join(sitePath, 'AGENTS.md'), 'utf8'), /customer-owned `commerce` site/);
     assert.match(fs.readFileSync(path.join(sitePath, '.env'), 'utf8'), /AGORA_SOLUTION=electronics/);
-    const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
-    const frontend = descriptor.topology.groups.frontends.find(entry => entry.code === 'acmeElectronicsSite');
-    assert.equal(frontend.cwd, '{workspaceRoot}/acme.electronics');
-    assert.equal(frontend.port, 3200);
-    assert.deepEqual(frontend.args, ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '3200']);
-    assert.deepEqual(descriptor.expansions.sites[0], {
-        name: 'acme.electronics',
-        type: 'commerce',
-        preset: 'electronics',
-        accelerator: 'electronics'
-    });
+    assert(!fs.existsSync(path.join(options.application.projectPath, 'nodics.project.json')));
     assert.match(fs.readFileSync(path.join(options.application.projectPath, '.env'), 'utf8'),
         /NODICS_ADDITIONAL_SITE_ROOTS=..\/acme\.electronics/);
     const evidence = installer.readEvidence(result.evidencePath);
     assert.equal(evidence.entries[0].action, 'add-site');
+    assert.equal(evidence.entries[0].siteName, 'acme.electronics');
+    assert.equal(evidence.entries[0].siteType, 'commerce');
+    assert.equal(evidence.entries[0].sitePreset, 'electronics');
+    assert.equal(evidence.entries[0].frontendPort, 3400);
 });
 
 test('CLI prints structured JSON', () => {
@@ -1617,7 +1535,7 @@ test('CLI prints structured JSON', () => {
     const parsed = JSON.parse(output);
     assert.equal(parsed.operation, 'local-setup-plan');
     assert.equal(parsed.installer.packageName, '@nodics/installer');
-    assert.equal(parsed.installer.version, '0.7.1');
+    assert.equal(parsed.installer.version, '0.7.2');
 });
 
 test('text plan warns beginners not to customize vendor-owned repositories', () => {

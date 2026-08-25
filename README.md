@@ -767,7 +767,7 @@ The installer follows these rules:
 
 ## Current Status
 
-Version `0.7.1` implements the multi-site application identity, selected local
+Version `0.7.2` implements the multi-site application identity, selected local
 environment identity, Docker identity cleanup, npm package readiness, and local
 operations setup contract:
 

@@ -25,14 +25,14 @@ repositories unless the user explicitly asks for that exact repository change.
 Every published installer release must have a matching Git tag:
 
 ```bash
-git tag -a v0.7.1 -m "Nodics Installer 0.7.1"
-git push origin v0.7.1
+git tag -a v0.7.2 -m "Nodics Installer 0.7.2"
+git push origin v0.7.2
 ```
 
 Beginners can then pin a known installer version:
 
 ```bash
-npx github:Nodics/nodics.installer#v0.7.1
+npx github:Nodics/nodics.installer#v0.7.2
 ```
 
 ## npm Publication Readiness
@@ -68,7 +68,7 @@ Use an empty workspace outside any source checkout:
 
 ```bash
 mkdir -p /tmp/nodics-fresh
-npx github:Nodics/nodics.installer#v0.7.1 \
+npx github:Nodics/nodics.installer#v0.7.2 \
   --action=execute \
   --yes \
   --execution-level=preflight \
@@ -311,7 +311,7 @@ existing customer repositories.
 Example gated commands:
 
 ```bash
-npx github:Nodics/nodics.installer#v0.7.1 \
+npx github:Nodics/nodics.installer#v0.7.2 \
   --action=add-environment \
   --yes \
   --workspace=/tmp/nodics-fresh \
@@ -322,7 +322,7 @@ npx github:Nodics/nodics.installer#v0.7.1 \
 ```
 
 ```bash
-npx github:Nodics/nodics.installer#v0.7.1 \
+npx github:Nodics/nodics.installer#v0.7.2 \
   --action=add-module \
   --yes \
   --workspace=/tmp/nodics-fresh \
@@ -332,7 +332,7 @@ npx github:Nodics/nodics.installer#v0.7.1 \
 ```
 
 ```bash
-npx github:Nodics/nodics.installer#v0.7.1 \
+npx github:Nodics/nodics.installer#v0.7.2 \
   --action=add-site \
   --yes \
   --workspace=/tmp/nodics-fresh \
@@ -395,7 +395,7 @@ customer work. Rollback of source changes remains a user-owned Git operation.
 For an existing customer project, use:
 
 ```bash
-npx github:Nodics/nodics.installer#v0.7.1 --action=repair --yes
+npx github:Nodics/nodics.installer#v0.7.2 --action=repair --yes
 ```
 
 The repair path updates installer identity, framework links, environment names,
