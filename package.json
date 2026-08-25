@@ -26,6 +26,7 @@
     "bin/",
     "config/",
     "docs/",
+    "llm/",
     "nodics.js",
     "src/"
   ],
@@ -49,7 +50,9 @@
     "owns": [
       "first-machine-bootstrap",
       "setup-plan",
-      "installer-evidence"
+      "installer-evidence",
+      "documentation",
+      "llm"
     ],
     "runtime": {
       "router": false,
