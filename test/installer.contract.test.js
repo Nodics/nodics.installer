@@ -68,7 +68,7 @@ test('creates an executable beginner local setup plan', () => {
     const plan = installer.createSetupPlan(installer.parseOptions([
         '--workspace=/tmp/nodicsRoot',
         '--application-name=Acme',
-        '--project-name=acme.project',
+        '--project-name=acme.startio',
         '--company-site-name=acme',
         '--commerce-site-name=acme-apparel',
         '--mode=node',
@@ -86,7 +86,7 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.installer.bootstrapCommand, 'npx github:Nodics/nodics.installer');
     assert.equal(plan.beginnerChoices.application.name, 'Acme');
     assert.equal(plan.beginnerChoices.application.code, 'acme');
-    assert.equal(plan.beginnerChoices.application.projectPath, '/tmp/nodicsRoot/acme.project');
+    assert.equal(plan.beginnerChoices.application.projectPath, '/tmp/nodicsRoot/acme.startio');
     assert.equal(plan.beginnerChoices.application.coreModuleName, 'acmeCore');
     assert.equal(plan.beginnerChoices.application.apiModuleName, 'acmeApi');
     assert.equal(plan.beginnerChoices.application.integrationModuleName, 'acmeInt');
@@ -98,14 +98,14 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.beginnerChoices.application.commerceSitePath, '/tmp/nodicsRoot/acme-apparel');
     assert.deepEqual(plan.accelerator.domains, ['common', 'apparel']);
     assert(plan.repositories.some(repository => repository.name === 'nodics.ai'));
-    assert(plan.repositories.some(repository => repository.name === 'acme.project'));
+    assert(plan.repositories.some(repository => repository.name === 'acme.startio'));
     assert(plan.repositories.some(repository => repository.name === 'nodics.axis'));
     assert(plan.repositories.some(repository => repository.name === 'acme'));
     assert(plan.repositories.some(repository => repository.name === 'acme-apparel'));
     assert.equal(plan.repositories.find(repository => repository.name === 'acme-apparel').targetPath,
         '/tmp/nodicsRoot/acme-apparel');
     assert.equal(Object.prototype.propertyIsEnumerable.call(
-        plan.repositories.find(repository => repository.name === 'acme.project'), 'repository'), false);
+        plan.repositories.find(repository => repository.name === 'acme.startio'), 'repository'), false);
     assert(!JSON.stringify(plan).includes('nodics.kickoff'));
     assert(!JSON.stringify(plan).includes('nodics.agora'));
     assert(!JSON.stringify(plan).includes('nodics.nexus'));
@@ -115,6 +115,15 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.expectedUrls.companySite, 'http://localhost:3200');
     assert.equal(plan.expectedUrls.commerceSite, 'http://localhost:3300');
     assert.equal(plan.evidencePath, '/tmp/nodicsRoot/.nodics-installer/setup-evidence.json');
+});
+
+test('defaults backend project code to a specific application identity', () => {
+    const options = installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme'
+    ]);
+    assert.equal(options.application.projectName, 'acme.startio');
+    assert.equal(options.application.projectPath, '/tmp/nodicsRoot/acme.startio');
 });
 
 test('creates a Docker Local setup plan with Docker preflight', () => {
@@ -174,6 +183,11 @@ test('rejects unsafe or deferred execution paths', () => {
         '--workspace=/tmp/nodicsRoot',
         '--apps=axis,nexus'
     ])), /Customer-facing apps are named with --application-name/);
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--project-name=acme.project'
+    ])), /Backend project name must be specific/);
 });
 
 test('questionnaire answers merge into normal options', async () => {
@@ -181,7 +195,7 @@ test('questionnaire answers merge into normal options', async () => {
     const options = await installer.runQuestionnaire(baseOptions, {
         journey: 'reference',
         applicationName: 'Customer Telco',
-        projectName: 'customer-telco.project',
+        projectName: 'customer-telco.portal',
         companySiteName: 'customer-telco',
         commerceSiteName: 'customer-telco-apparel',
         workspace: '/tmp/nodicsQuestionnaire',
@@ -194,7 +208,7 @@ test('questionnaire answers merge into normal options', async () => {
     assert.equal(options.action, 'questionnaire');
     assert.equal(options.application.name, 'Customer Telco');
     assert.equal(options.application.code, 'customer-telco');
-    assert.equal(options.application.projectName, 'customer-telco.project');
+    assert.equal(options.application.projectName, 'customer-telco.portal');
     assert.equal(options.application.coreModuleName, 'customerTelcoCore');
     assert.equal(options.application.apiModuleName, 'customerTelcoApi');
     assert.equal(options.application.integrationModuleName, 'customerTelcoInt');
@@ -288,7 +302,7 @@ test('execute writes resumable evidence with injected stages', async () => {
     const service = {
         ...installer,
         prepareRepositories: () => [{ repository: 'nodics.ai', action: 'reused' }],
-        rebrandGeneratedApplications: () => ['evidence-app.project/.nodics-installer-identity.json'],
+        rebrandGeneratedApplications: () => ['evidence-app.startio/.nodics-installer-identity.json'],
         installFrameworkDependencies: () => ({ status: 'passed', command: 'npm ci' }),
         configureApplicationProject: () => ({ status: 'passed', command: 'npm run configure:framework' }),
         installDependencies: () => [{ status: 'passed', command: 'npm ci' }],
@@ -313,7 +327,7 @@ test('execute writes resumable evidence with injected stages', async () => {
 
 test('rebrand rewrites generated topology frontend roots', () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-topology-'));
-    const projectPath = path.join(workspace, 'acme.project');
+    const projectPath = path.join(workspace, 'acme.startio');
     const axisPath = path.join(workspace, 'nodics.axis');
     const companyPath = path.join(workspace, 'acme');
     const commercePath = path.join(workspace, 'acme-apparel');
@@ -366,7 +380,7 @@ test('rebrand rewrites generated topology frontend roots', () => {
     const options = installer.parseOptions([
         '--workspace=' + workspace,
         '--application-name=Acme',
-        '--project-name=acme.project',
+        '--project-name=acme.startio',
         '--company-site-name=acme',
         '--commerce-site-name=acme-apparel',
         '--accelerator=apparel'
@@ -395,12 +409,12 @@ test('rebrand rewrites generated topology frontend roots', () => {
     assert(fs.existsSync(path.join(projectPath, 'modules', 'acmeInt')));
     assert(fs.existsSync(path.join(projectPath, 'envs', 'acmeLocal')));
     assert(fs.existsSync(path.join(projectPath, 'envs', 'acmeDockerLocal')));
-    assert.match(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /'acme\.project'/);
+    assert.match(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /'acme\.startio'/);
     assert.match(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /'acmeCore'/);
     assert.doesNotMatch(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /kickoffCore|kickoffLocal/);
     const dockerFile = fs.readFileSync(path.join(projectPath, 'envs', 'acmeDockerLocal', 'docker', 'backend.Dockerfile'), 'utf8');
     assert.match(dockerFile, /ENV=acmeDockerLocal/);
-    assert.match(dockerFile, /COPY acme\.project \/workspace\/acme\.project/);
+    assert.match(dockerFile, /COPY acme\.startio \/workspace\/acme\.startio/);
     assert.doesNotMatch(dockerFile, /kickoffDockerLocal|nodics\.kickoff/);
     const dockerCompose = fs.readFileSync(path.join(projectPath, 'envs', 'acmeDockerLocal', 'docker', 'compose.yaml'), 'utf8');
     assert.match(dockerCompose, /name: nodics-acme-docker-local/);
@@ -410,7 +424,7 @@ test('rebrand rewrites generated topology frontend roots', () => {
     assert.match(dockerCompose, /nodics-acme-docker-local-public/);
     assert.doesNotMatch(dockerCompose, /nodics-kickoff-docker-local|nodics\.exp\/nodics\.(axis|nexus)/);
     assert.match(fs.readFileSync(path.join(dataPath, 'content.js'), 'utf8'), /nodics\.kickoff checksum payload/);
-    assert.match(fs.readFileSync(path.join(axisPath, '.env'), 'utf8'), /AXIS_PROJECT_CODE=acme\.project/);
+    assert.match(fs.readFileSync(path.join(axisPath, '.env'), 'utf8'), /AXIS_PROJECT_CODE=acme\.startio/);
     assert.match(fs.readFileSync(path.join(companyPath, '.env'), 'utf8'), /NEXUS_PLATFORM_BASE_URL=http:\/\/localhost:4300/);
     assert.match(fs.readFileSync(path.join(commercePath, '.env'), 'utf8'), /AGORA_SOLUTION=apparel/);
 });
@@ -428,7 +442,7 @@ test('resumed evidence refreshes requested execution context', async () => {
     const service = {
         ...installer,
         prepareRepositories: () => [{ repository: 'nodics.ai', action: 'reused' }],
-        rebrandGeneratedApplications: () => ['resume-app.project/.nodics-installer-identity.json'],
+        rebrandGeneratedApplications: () => ['resume-app.startio/.nodics-installer-identity.json'],
         installFrameworkDependencies: () => ({ status: 'passed', command: 'npm ci' }),
         configureApplicationProject: () => ({ status: 'passed', command: 'npm run configure:framework' }),
         installDependencies: () => [{ status: 'passed', command: 'npm ci' }]
@@ -467,7 +481,7 @@ test('start execution rechecks live topology even when evidence has a prior star
     const service = {
         ...installer,
         prepareRepositories: () => [{ repository: 'nodics.ai', action: 'reused' }],
-        rebrandGeneratedApplications: () => ['resume-start.project/.nodics-installer-identity.json'],
+        rebrandGeneratedApplications: () => ['resume-start.startio/.nodics-installer-identity.json'],
         installFrameworkDependencies: () => ({ status: 'passed', command: 'npm ci' }),
         configureApplicationProject: () => ({ status: 'passed', command: 'npm run configure:framework' }),
         installDependencies: () => [{ status: 'passed', command: 'npm ci' }],
@@ -579,7 +593,7 @@ test('operational failures include beginner import diagnostics', () => {
     const options = installer.parseOptions([
         '--workspace=' + workspace,
         '--application-name=Acme',
-        '--project-name=acme.project'
+        '--project-name=acme.startio'
     ]);
     const artifactPath = path.join(
         options.application.projectPath,
@@ -620,7 +634,7 @@ test('status summarizes evidence repositories topology and urls', () => {
     const options = installer.parseOptions([
         '--workspace=' + workspace,
         '--application-name=Acme',
-        '--project-name=acme.project',
+        '--project-name=acme.startio',
         '--company-site-name=acme',
         '--commerce-site-name=acme-apparel',
         '--apps=axis'
@@ -661,7 +675,7 @@ test('logs action reads topology log excerpts by runtime', () => {
     const options = installer.parseOptions([
         '--workspace=' + workspace,
         '--application-name=Acme',
-        '--project-name=acme.project',
+        '--project-name=acme.startio',
         '--runtime=platform',
         '--lines=2'
     ]);
@@ -689,7 +703,7 @@ test('clean removes generated runtime directories only when topology is stopped'
     const options = installer.parseOptions([
         '--workspace=' + workspace,
         '--application-name=Acme',
-        '--project-name=acme.project',
+        '--project-name=acme.startio',
         '--action=clean',
         '--yes'
     ]);

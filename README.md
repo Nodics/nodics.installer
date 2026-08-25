@@ -23,7 +23,7 @@ npx github:Nodics/nodics.installer
 ```
 
 When started from a normal terminal, that command asks guided questions first:
-application name, backend project folder, company site folder, commerce site
+application name, backend project code/folder, company site folder, commerce site
 folder, workspace folder, local mode, Axis selection, accelerator, repository
 access, and release branch. After the answers, it prints a dry-run setup plan.
 It does not clone repositories, install dependencies, start services, or write
@@ -35,7 +35,7 @@ To skip questions and print a plan directly:
 npx github:Nodics/nodics.installer \
   --action=plan \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel
 ```
@@ -124,7 +124,7 @@ Before running execution, use preflight:
 npx github:Nodics/nodics.installer \
   --action=preflight \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -189,7 +189,7 @@ The currently implemented journey is:
 ```bash
 npx github:Nodics/nodics.installer \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer \
@@ -201,7 +201,7 @@ npx github:Nodics/nodics.installer \
 This plans a local setup using:
 
 - `nodics.ai` for the framework;
-- `acme.project` for the customer backend application project;
+- `acme.startio` for the customer backend application project;
 - `nodics.axis` for BackOffice, unchanged;
 - `acme` for the company site, derived from the Nexus template;
 - `acme-apparel` for the apparel commerce site, derived from the Agora template.
@@ -236,7 +236,7 @@ The questionnaire uses plain setup language:
 2. Application name: the customer name used for identity and evidence.
 3. Commerce site folder: for example `acme-apparel`.
 4. Company site folder: for example `acme`.
-5. Backend project folder: for example `acme.project`.
+5. Backend project code/folder: for example `acme.startio`.
 6. Workspace folder: where Nodics should live.
 7. Runtime mode: direct Node.js local processes or Docker Local.
 8. Standard applications: Axis or no standard app.
@@ -280,7 +280,7 @@ After startup, these daily commands are usually enough:
 npx github:Nodics/nodics.installer \
   --action=status \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -292,7 +292,7 @@ npx github:Nodics/nodics.installer \
   --runtime=platform \
   --lines=80 \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -303,7 +303,7 @@ npx github:Nodics/nodics.installer \
   --action=restart \
   --yes \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -317,7 +317,7 @@ npx github:Nodics/nodics.installer \
   --yes \
   --execution-level=download \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -329,7 +329,7 @@ npx github:Nodics/nodics.installer \
   --yes \
   --execution-level=start \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --accelerator=apparel \
@@ -460,7 +460,7 @@ Start with the least destructive checks:
 npx github:Nodics/nodics.installer \
   --action=status \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -470,7 +470,7 @@ npx github:Nodics/nodics.installer \
 npx github:Nodics/nodics.installer \
   --action=doctor \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -489,7 +489,7 @@ services required by the selected local profile, then rerun:
 npx github:Nodics/nodics.installer \
   --action=doctor \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -507,7 +507,7 @@ npx github:Nodics/nodics.installer \
   --runtime=wcmsStaged \
   --lines=120 \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -530,7 +530,7 @@ npx github:Nodics/nodics.installer \
   --action=stop \
   --yes \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -539,7 +539,7 @@ npx github:Nodics/nodics.installer \
   --action=clean \
   --yes \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -548,7 +548,7 @@ npx github:Nodics/nodics.installer \
   --action=start \
   --yes \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -557,7 +557,7 @@ npx github:Nodics/nodics.installer \
   --action=initialize \
   --yes \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer
@@ -581,7 +581,7 @@ npx github:Nodics/nodics.installer \
   --mode=docker \
   --action=preflight \
   --application-name=Acme \
-  --project-name=acme.project \
+  --project-name=acme.startio \
   --company-site-name=acme \
   --commerce-site-name=acme-apparel \
   --workspace=/Users/me/Projects/NodicsCustomer

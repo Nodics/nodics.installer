@@ -179,11 +179,15 @@ const installer = {
             .replace(/^-+|-+$/g, '') || 'my-nodics-app';
     },
 
+    defaultProjectName: function (applicationName) {
+        return this.toApplicationSlug(applicationName) + '.startio';
+    },
+
     createApplicationIdentity: function (options) {
         const title = this.toApplicationTitle(options.applicationName);
         const slug = this.toApplicationSlug(options.applicationName);
         const dockerSlug = this.toDockerIdentifier(slug);
-        const projectSlug = this.toApplicationSlug(options.projectName || slug + '.project');
+        const projectSlug = this.toApplicationSlug(options.projectName || this.defaultProjectName(options.applicationName));
         const commerceSlug = this.toApplicationSlug(options.commerceSiteName || slug + '-apparel');
         const companySlug = this.toApplicationSlug(options.companySiteName || slug);
         const modulePrefix = this.toLowerCamelIdentifier(slug);
@@ -251,7 +255,7 @@ const installer = {
             'Options:',
             '  --journey=reference|project',
             '  --application-name="My Store"   Customer application name. Default: My Nodics App',
-            '  --project-name=my-store.project Backend/customer project folder.',
+            '  --project-name=my-store.startio Backend/customer project code/folder.',
             '  --commerce-site-name=my-store-apparel',
             '                                  Commerce/apparel site folder. Default: <app>-apparel',
             '  --company-site-name=my-store    Company site folder. Default: <app>',
@@ -357,7 +361,11 @@ const installer = {
             { name: 'applicationName', question: 'Application name', defaultValue: 'My Nodics App' },
             { name: 'commerceSiteName', question: 'Commerce/apparel site name', defaultValue: 'my-nodics-app-apparel' },
             { name: 'companySiteName', question: 'Company site name', defaultValue: 'my-nodics-app' },
-            { name: 'projectName', question: 'Backend/customer project folder', defaultValue: 'my-nodics-app.project' },
+            {
+                name: 'projectName',
+                question: 'Backend project code/folder',
+                defaultValue: answers => this.defaultProjectName(answers.applicationName || 'My Nodics App')
+            },
             { name: 'workspace', question: 'Workspace folder', defaultValue: path.join(os.homedir(), 'Nodics', 'nodicsRoot') },
             { name: 'mode', question: 'Runtime mode (node/docker)', defaultValue: 'node' },
             { name: 'apps', question: 'Standard applications (axis)', defaultValue: 'axis' },
@@ -389,13 +397,18 @@ const installer = {
         return '--' + name + '=' + value;
     },
 
-    promptField: async function (reader, field, scriptedAnswers) {
+    resolveQuestionDefault: function (field, answers) {
+        return typeof field.defaultValue === 'function' ? field.defaultValue(answers || {}) : field.defaultValue;
+    },
+
+    promptField: async function (reader, field, scriptedAnswers, answers) {
+        const defaultValue = this.resolveQuestionDefault(field, answers);
         if (scriptedAnswers && Object.prototype.hasOwnProperty.call(scriptedAnswers, field.name)) {
-            return scriptedAnswers[field.name] || field.defaultValue;
+            return scriptedAnswers[field.name] || defaultValue;
         }
         return new Promise(resolve => {
-            reader.question(field.question + ' [' + field.defaultValue + ']: ', answer => {
-                resolve((answer || field.defaultValue).trim());
+            reader.question(field.question + ' [' + defaultValue + ']: ', answer => {
+                resolve((answer || defaultValue).trim());
             });
         });
     },
@@ -404,9 +417,11 @@ const installer = {
         const fields = this.getQuestionnaireFields();
         const reader = readline.createInterface({ input: process.stdin, output: process.stdout });
         const args = [];
+        const answers = {};
         try {
             for (const field of fields) {
-                const answer = await this.promptField(reader, field, scriptedAnswers);
+                const answer = await this.promptField(reader, field, scriptedAnswers, answers);
+                answers[field.name] = answer;
                 args.push(this.normalizeQuestionnaireAnswer(field.name, answer));
             }
         } finally {
@@ -469,6 +484,9 @@ const installer = {
                 errors.push(field + ' must contain at least one letter or number.');
             }
         });
+        if (options.application && /(^|[.-])project$/.test(options.application.projectName)) {
+            errors.push('Backend project name must be specific, for example acme.startio. Do not use a generic .project or -project suffix.');
+        }
         if (options.application) {
             const generatedPaths = [
                 options.application.projectPath,
