@@ -69,8 +69,8 @@ test('creates an executable beginner local setup plan', () => {
         '--workspace=/tmp/nodicsRoot',
         '--application-name=Acme',
         '--project-name=acme.startio',
-        '--company-site-name=acme',
-        '--commerce-site-name=acme-apparel',
+        '--company-site-name=acme.web',
+        '--commerce-site-name=acme.apparel',
         '--mode=node',
         '--apps=axis',
         '--accelerator=apparel',
@@ -94,16 +94,16 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.beginnerChoices.application.dockerLocalEnvironmentName, 'acmeDockerLocal');
     assert.equal(plan.beginnerChoices.application.dockerComposeProjectName, 'nodics-acme-docker-local');
     assert.equal(plan.beginnerChoices.application.dockerBackendImageName, 'nodics/acme-backend');
-    assert.equal(plan.beginnerChoices.application.companySitePath, '/tmp/nodicsRoot/acme');
-    assert.equal(plan.beginnerChoices.application.commerceSitePath, '/tmp/nodicsRoot/acme-apparel');
+    assert.equal(plan.beginnerChoices.application.companySitePath, '/tmp/nodicsRoot/acme.web');
+    assert.equal(plan.beginnerChoices.application.commerceSitePath, '/tmp/nodicsRoot/acme.apparel');
     assert.deepEqual(plan.accelerator.domains, ['common', 'apparel']);
     assert(plan.repositories.some(repository => repository.name === 'nodics.ai'));
     assert(plan.repositories.some(repository => repository.name === 'acme.startio'));
     assert(plan.repositories.some(repository => repository.name === 'nodics.axis'));
-    assert(plan.repositories.some(repository => repository.name === 'acme'));
-    assert(plan.repositories.some(repository => repository.name === 'acme-apparel'));
-    assert.equal(plan.repositories.find(repository => repository.name === 'acme-apparel').targetPath,
-        '/tmp/nodicsRoot/acme-apparel');
+    assert(plan.repositories.some(repository => repository.name === 'acme.web'));
+    assert(plan.repositories.some(repository => repository.name === 'acme.apparel'));
+    assert.equal(plan.repositories.find(repository => repository.name === 'acme.apparel').targetPath,
+        '/tmp/nodicsRoot/acme.apparel');
     assert.equal(Object.prototype.propertyIsEnumerable.call(
         plan.repositories.find(repository => repository.name === 'acme.startio'), 'repository'), false);
     assert(!JSON.stringify(plan).includes('nodics.kickoff'));
@@ -124,6 +124,10 @@ test('defaults backend project code to a specific application identity', () => {
     ]);
     assert.equal(options.application.projectName, 'acme.startio');
     assert.equal(options.application.projectPath, '/tmp/nodicsRoot/acme.startio');
+    assert.equal(options.application.companySiteName, 'acme.web');
+    assert.equal(options.application.companySitePath, '/tmp/nodicsRoot/acme.web');
+    assert.equal(options.application.commerceSiteName, 'acme.commerce');
+    assert.equal(options.application.commerceSitePath, '/tmp/nodicsRoot/acme.commerce');
 });
 
 test('creates a Docker Local setup plan with Docker preflight', () => {
@@ -196,8 +200,8 @@ test('questionnaire answers merge into normal options', async () => {
         journey: 'reference',
         applicationName: 'Customer Telco',
         projectName: 'customer-telco.portal',
-        companySiteName: 'customer-telco',
-        commerceSiteName: 'customer-telco-apparel',
+        companySiteName: 'customer-telco.web',
+        commerceSiteName: 'customer-telco.commerce',
         workspace: '/tmp/nodicsQuestionnaire',
         mode: 'docker',
         apps: 'axis',
@@ -214,8 +218,8 @@ test('questionnaire answers merge into normal options', async () => {
     assert.equal(options.application.integrationModuleName, 'customerTelcoInt');
     assert.equal(options.application.localEnvironmentName, 'customerTelcoLocal');
     assert.equal(options.application.dockerLocalEnvironmentName, 'customerTelcoDockerLocal');
-    assert.equal(options.application.companySiteName, 'customer-telco');
-    assert.equal(options.application.commerceSiteName, 'customer-telco-apparel');
+    assert.equal(options.application.companySiteName, 'customer-telco.web');
+    assert.equal(options.application.commerceSiteName, 'customer-telco.commerce');
     assert.equal(options.workspace, '/tmp/nodicsQuestionnaire');
     assert.equal(options.mode, 'docker');
     assert.deepEqual(options.apps, ['axis']);
@@ -329,8 +333,8 @@ test('rebrand rewrites generated topology frontend roots', () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-topology-'));
     const projectPath = path.join(workspace, 'acme.startio');
     const axisPath = path.join(workspace, 'nodics.axis');
-    const companyPath = path.join(workspace, 'acme');
-    const commercePath = path.join(workspace, 'acme-apparel');
+    const companyPath = path.join(workspace, 'acme.web');
+    const commercePath = path.join(workspace, 'acme.apparel');
     fs.mkdirSync(projectPath, { recursive: true });
     fs.mkdirSync(axisPath, { recursive: true });
     fs.mkdirSync(companyPath, { recursive: true });
@@ -381,8 +385,8 @@ test('rebrand rewrites generated topology frontend roots', () => {
         '--workspace=' + workspace,
         '--application-name=Acme',
         '--project-name=acme.startio',
-        '--company-site-name=acme',
-        '--commerce-site-name=acme-apparel',
+        '--company-site-name=acme.web',
+        '--commerce-site-name=acme.apparel',
         '--accelerator=apparel'
     ]);
     installer.renameProjectIdentityPaths(projectPath, options);
@@ -396,8 +400,8 @@ test('rebrand rewrites generated topology frontend roots', () => {
         cwd: frontend.cwd
     })), [
         { code: 'axis', label: 'Axis', cwd: '{workspaceRoot}/nodics.axis' },
-        { code: 'companySite', label: 'Acme', cwd: '{workspaceRoot}/acme' },
-        { code: 'commerceSite', label: 'Acme Apparel', cwd: '{workspaceRoot}/acme-apparel' }
+        { code: 'companySite', label: 'Acme Web', cwd: '{workspaceRoot}/acme.web' },
+        { code: 'commerceSite', label: 'Acme Apparel', cwd: '{workspaceRoot}/acme.apparel' }
     ]);
     const renamedServerConfigPath = path.join(projectPath, 'envs', 'acmeLocal', 'platformServer', 'config');
     assert(!fs.existsSync(path.join(projectPath, 'modules', 'kickoffCore')));
@@ -420,7 +424,7 @@ test('rebrand rewrites generated topology frontend roots', () => {
     assert.match(dockerCompose, /name: nodics-acme-docker-local/);
     assert.match(dockerCompose, /image: nodics\/acme-backend:docker-local/);
     assert.match(dockerCompose, /FRONTEND_PROJECT: nodics\.axis/);
-    assert.match(dockerCompose, /FRONTEND_PROJECT: acme/);
+    assert.match(dockerCompose, /FRONTEND_PROJECT: acme\.web/);
     assert.match(dockerCompose, /nodics-acme-docker-local-public/);
     assert.doesNotMatch(dockerCompose, /nodics-kickoff-docker-local|nodics\.exp\/nodics\.(axis|nexus)/);
     assert.match(fs.readFileSync(path.join(dataPath, 'content.js'), 'utf8'), /nodics\.kickoff checksum payload/);
@@ -635,8 +639,8 @@ test('status summarizes evidence repositories topology and urls', () => {
         '--workspace=' + workspace,
         '--application-name=Acme',
         '--project-name=acme.startio',
-        '--company-site-name=acme',
-        '--commerce-site-name=acme-apparel',
+        '--company-site-name=acme.web',
+        '--commerce-site-name=acme.apparel',
         '--apps=axis'
     ]);
     const plan = installer.createSetupPlan(options);

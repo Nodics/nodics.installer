@@ -69,8 +69,8 @@ npx github:Nodics/nodics.installer#v0.7.0 \
   --workspace=/tmp/nodics-fresh \
   --application-name=Acme \
   --project-name=acme.startio \
-  --company-site-name=acme \
-  --commerce-site-name=acme-apparel \
+  --company-site-name=acme.web \
+  --commerce-site-name=acme.apparel \
   --apps=axis \
   --accelerator=apparel
 ```

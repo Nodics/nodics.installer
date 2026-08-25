@@ -183,13 +183,29 @@ const installer = {
         return this.toApplicationSlug(applicationName) + '.startio';
     },
 
+    defaultCompanySiteName: function (applicationName) {
+        return this.toApplicationSlug(applicationName) + '.web';
+    },
+
+    defaultCommerceSiteName: function (applicationName, accelerator) {
+        const commerceSuffixByAccelerator = {
+            apparel: 'apparel',
+            electronics: 'electronics',
+            telco: 'telco',
+            combined: 'commerce',
+            common: 'commerce'
+        };
+        return this.toApplicationSlug(applicationName) + '.' + (commerceSuffixByAccelerator[accelerator] || 'commerce');
+    },
+
     createApplicationIdentity: function (options) {
         const title = this.toApplicationTitle(options.applicationName);
         const slug = this.toApplicationSlug(options.applicationName);
         const dockerSlug = this.toDockerIdentifier(slug);
         const projectSlug = this.toApplicationSlug(options.projectName || this.defaultProjectName(options.applicationName));
-        const commerceSlug = this.toApplicationSlug(options.commerceSiteName || slug + '-apparel');
-        const companySlug = this.toApplicationSlug(options.companySiteName || slug);
+        const commerceSlug = this.toApplicationSlug(options.commerceSiteName ||
+            this.defaultCommerceSiteName(options.applicationName, options.accelerator));
+        const companySlug = this.toApplicationSlug(options.companySiteName || this.defaultCompanySiteName(options.applicationName));
         const modulePrefix = this.toLowerCamelIdentifier(slug);
         const servicePrefix = this.toUpperCamelIdentifier(modulePrefix);
         return {
@@ -256,9 +272,9 @@ const installer = {
             '  --journey=reference|project',
             '  --application-name="My Store"   Customer application name. Default: My Nodics App',
             '  --project-name=my-store.startio Backend/customer project code/folder.',
-            '  --commerce-site-name=my-store-apparel',
-            '                                  Commerce/apparel site folder. Default: <app>-apparel',
-            '  --company-site-name=my-store    Company site folder. Default: <app>',
+            '  --commerce-site-name=my-store.apparel',
+            '                                  Commerce/apparel site folder. Default: <app>.<accelerator>',
+            '  --company-site-name=my-store.web Company site folder. Default: <app>.web',
             '  --workspace=/absolute/path       Default: ~/Nodics/nodicsRoot',
             '  --mode=node|docker               Default: node',
             '  --apps=axis                      Standard apps to include. Default: axis',
@@ -359,8 +375,9 @@ const installer = {
         return [
             { name: 'journey', question: 'Setup style (reference/project)', defaultValue: 'reference' },
             { name: 'applicationName', question: 'Application name', defaultValue: 'My Nodics App' },
-            { name: 'commerceSiteName', question: 'Commerce/apparel site name', defaultValue: 'my-nodics-app-apparel' },
-            { name: 'companySiteName', question: 'Company site name', defaultValue: 'my-nodics-app' },
+            { name: 'accelerator', question: 'Accelerator (common/apparel/electronics/telco/combined)', defaultValue: 'common' },
+            { name: 'commerceSiteName', question: 'Commerce/apparel site name', defaultValue: answers => this.defaultCommerceSiteName(answers.applicationName || 'My Nodics App', answers.accelerator || 'common') },
+            { name: 'companySiteName', question: 'Company site name', defaultValue: answers => this.defaultCompanySiteName(answers.applicationName || 'My Nodics App') },
             {
                 name: 'projectName',
                 question: 'Backend project code/folder',
@@ -369,7 +386,6 @@ const installer = {
             { name: 'workspace', question: 'Workspace folder', defaultValue: path.join(os.homedir(), 'Nodics', 'nodicsRoot') },
             { name: 'mode', question: 'Runtime mode (node/docker)', defaultValue: 'node' },
             { name: 'apps', question: 'Standard applications (axis)', defaultValue: 'axis' },
-            { name: 'accelerator', question: 'Accelerator (common/apparel/electronics/telco/combined)', defaultValue: 'common' },
             { name: 'cloneMode', question: 'Repository access (https/ssh/existing)', defaultValue: 'https' },
             { name: 'release', question: 'Branch or tag', defaultValue: 'development' }
         ];
