@@ -43,6 +43,15 @@ npx github:Nodics/nodics.installer \
 In non-interactive shells, such as CI or JSON piping, the installer also avoids
 prompts and prints deterministic output from provided options.
 
+If a user starts from an AI coding tool such as Codex, Claude Code, GitHub
+Copilot, or another repository-aware assistant, they can point that tool
+directly at a Nodics GitHub repository URL. In that path the AI tool should read
+the repository's root `AGENTS.md`, then the nearest module `AGENTS.md` and
+README before changing files. The user does not need to install or run the
+installer first for repository analysis or source work. The installer is still
+the right tool when the user wants to create, repair, preflight, start,
+initialize, or accept a local customer workspace.
+
 For local development inside this repository:
 
 ```bash

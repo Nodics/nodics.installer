@@ -43,6 +43,27 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
     assert.equal(await nodicsRoot.postInit({}), true);
 });
 
+test('documentation preserves AI tool repository entry path', () => {
+    const requiredClauses = [
+        'Codex',
+        'Claude Code',
+        'GitHub Copilot',
+        'repository URL',
+        'does not need',
+        'local customer workspace'
+    ];
+    [
+        'AGENTS.md',
+        'README.md',
+        'docs/enterprise-readiness.md'
+    ].forEach(relativePath => {
+        const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8').replace(/\s+/g, ' ');
+        requiredClauses.forEach(clause => {
+            assert(content.includes(clause), relativePath + ' must preserve AI entry guidance: ' + clause);
+        });
+    });
+});
+
 test('creates an executable beginner local setup plan', () => {
     const plan = installer.createSetupPlan(installer.parseOptions([
         '--workspace=/tmp/nodicsRoot',

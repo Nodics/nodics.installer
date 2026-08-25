@@ -4,6 +4,22 @@ This document records the enterprise hardening checklist for first-machine
 Nodics setup. It is written for beginners, customer developers, support
 engineers, and release owners.
 
+## AI Tool Entry
+
+A user may start the Nodics journey from an AI coding tool such as Codex,
+Claude Code, GitHub Copilot, or another repository-aware assistant by providing
+the relevant Nodics GitHub repository URL. In that path the user does not need
+to install or run `nodics.installer` first.
+
+The AI tool must read the target repository's root `AGENTS.md`, then root
+`README.md`, then the nearest module, environment, or application `AGENTS.md`
+before making changes. Use the installer only when the goal is to create,
+repair, preflight, start, initialize, accept, or inspect a local customer
+workspace.
+
+Generated customer-local output must not be committed to Nodics source
+repositories unless the user explicitly asks for that exact repository change.
+
 ## Release Tagging
 
 Every published installer release must have a matching Git tag:

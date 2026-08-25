@@ -13,6 +13,22 @@ questions, creates a safe setup plan, downloads or reuses repositories, delegate
 Nodics-aware work to framework/project tooling after those repositories exist,
 and writes local setup evidence.
 
+## AI tool entry path
+
+A user working inside Codex, Claude Code, GitHub Copilot, or another
+repository-aware AI coding tool can start by giving the AI tool a Nodics GitHub
+repository URL. That path does not need downloading this installer first.
+
+Use this installer only when the user's goal is to create, repair, preflight,
+start, initialize, accept, or inspect a local customer workspace. If the user is
+asking for architecture, code analysis, source changes, reviews, or module
+documentation inside an existing Nodics repository, follow that repository's
+root `AGENTS.md` and nearest module guidance instead.
+
+When the installer is used from an AI tool, confirm the target workspace before
+mutating actions and keep generated customer-local output out of source
+repository commits unless the user explicitly asks otherwise.
+
 ## Ownership
 
 - Own beginner bootstrap questions, setup-plan creation, repository
