@@ -15,6 +15,17 @@
 const installer = require('../src/installer');
 
 Promise.resolve(installer.run(process.argv.slice(2))).catch(error => {
-    console.error(error && error.stack ? error.stack : error);
+    const args = process.argv.slice(2);
+    const message = error && error.message ? error.message : String(error);
+    if (args.includes('--json')) {
+        console.error(JSON.stringify({
+            operation: 'local-installer-error',
+            ok: false,
+            error: message
+        }, null, 2));
+    } else {
+        console.error('Nodics Installer failed');
+        console.error(message);
+    }
     process.exitCode = 1;
 });

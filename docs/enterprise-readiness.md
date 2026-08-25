@@ -160,6 +160,41 @@ identity, refuse dirty repositories, update project contracts deterministically,
 and write new evidence. They must not rerun first-machine bootstrap or rename
 existing customer repositories.
 
+Example gated commands:
+
+```bash
+npx github:Nodics/nodics.installer#v0.7.0 \
+  --action=add-environment \
+  --yes \
+  --workspace=/tmp/nodics-fresh \
+  --application-name=Acme \
+  --project-name=acme.startio \
+  --environment-name=acmeQa \
+  --from-environment=acmeLocal
+```
+
+```bash
+npx github:Nodics/nodics.installer#v0.7.0 \
+  --action=add-module \
+  --yes \
+  --workspace=/tmp/nodics-fresh \
+  --application-name=Acme \
+  --project-name=acme.startio \
+  --module-name=acmeLoyalty
+```
+
+```bash
+npx github:Nodics/nodics.installer#v0.7.0 \
+  --action=add-site \
+  --yes \
+  --workspace=/tmp/nodics-fresh \
+  --application-name=Acme \
+  --project-name=acme.startio \
+  --site-name=acme.electronics \
+  --site-type=commerce \
+  --accelerator=electronics
+```
+
 ## Security Review
 
 The installer must not print or persist secrets. Evidence and terminal output

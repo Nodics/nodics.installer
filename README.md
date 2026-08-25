@@ -296,6 +296,51 @@ the project contract and environment links, refuse dirty repositories, and write
 new evidence. They must not rerun the first-machine bootstrap or rename the
 already-created `acme.startio`, `acme.web`, or `acme.apparel` projects.
 
+Add one environment:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=add-environment \
+  --yes \
+  --application-name=Acme \
+  --project-name=acme.startio \
+  --environment-name=acmeQa \
+  --from-environment=acmeLocal \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+Add one backend module:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=add-module \
+  --yes \
+  --application-name=Acme \
+  --project-name=acme.startio \
+  --module-name=acmeLoyalty \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+Add one additional commerce site:
+
+```bash
+npx github:Nodics/nodics.installer \
+  --action=add-site \
+  --yes \
+  --application-name=Acme \
+  --project-name=acme.startio \
+  --site-name=acme.electronics \
+  --site-type=commerce \
+  --accelerator=electronics \
+  --workspace=/Users/me/Projects/NodicsCustomer
+```
+
+Expansion evidence is written to:
+
+```text
+<workspace>/.nodics-installer/expansion-evidence.json
+```
+
 After startup, these daily commands are usually enough:
 
 ```bash
@@ -634,6 +679,7 @@ operations setup contract:
 - prerequisite, doctor, and port preflight;
 - safe clone/reuse execution;
 - template rebranding, first local environment renaming, and local identity files;
+- expansion actions for one environment, module, or site at a time;
 - framework-first dependency installation;
 - application `.env` framework and identity linking;
 - dependency install orchestration;

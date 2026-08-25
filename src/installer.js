@@ -27,11 +27,16 @@ const VALID_APPS = new Set(['axis']);
 const VALID_ACCELERATORS = new Set(['common', 'apparel', 'electronics', 'telco', 'combined']);
 const VALID_ACTIONS = new Set([
     'plan', 'questionnaire', 'preflight', 'doctor', 'execute', 'status', 'start', 'stop', 'restart', 'logs',
-    'initialize', 'acceptance', 'repair', 'clean', 'troubleshooting', 'version'
+    'initialize', 'acceptance', 'repair', 'clean', 'add-environment', 'add-module', 'add-site',
+    'troubleshooting', 'version'
 ]);
-const MUTATING_ACTIONS = new Set(['execute', 'start', 'stop', 'restart', 'initialize', 'acceptance', 'repair', 'clean']);
+const MUTATING_ACTIONS = new Set([
+    'execute', 'start', 'stop', 'restart', 'initialize', 'acceptance', 'repair', 'clean',
+    'add-environment', 'add-module', 'add-site'
+]);
 const VALID_EXECUTION_LEVELS = new Set(['download', 'install', 'preflight', 'start', 'initialize', 'acceptance']);
 const VALID_CLONE_MODES = new Set(['https', 'ssh', 'existing']);
+const VALID_SITE_TYPES = new Set(['company', 'commerce']);
 
 const DEFAULT_REPOSITORIES = Object.freeze({
     framework: {
@@ -179,6 +184,22 @@ const installer = {
             .replace(/^-+|-+$/g, '') || 'my-nodics-app';
     },
 
+    toNodicsIdentifier: function (value, fallback) {
+        const raw = String(value || fallback || '')
+            .trim()
+            .replace(/[^A-Za-z0-9]+/g, ' ');
+        if (!raw) {
+            return '';
+        }
+        const compact = raw.indexOf(' ') === -1 ? raw : raw.split(/\s+/g)
+            .filter(Boolean)
+            .map((word, index) => index === 0 ?
+                word.charAt(0).toLowerCase() + word.slice(1) :
+                word.charAt(0).toUpperCase() + word.slice(1))
+            .join('');
+        return compact.charAt(0).toLowerCase() + compact.slice(1);
+    },
+
     defaultProjectName: function (applicationName) {
         return this.toApplicationSlug(applicationName) + '.startio';
     },
@@ -265,6 +286,10 @@ const installer = {
             '  --action=acceptance --yes Run local acceptance checks.',
             '  --action=repair --yes     Reapply installer identity and framework links.',
             '  --action=clean --yes      Remove generated runtime files only.',
+            '  --action=add-environment --yes',
+            '                             Add one explicit environment after first setup.',
+            '  --action=add-module --yes Add one customer backend module after first setup.',
+            '  --action=add-site --yes   Add one customer site after first setup.',
             '  --action=troubleshooting  Print known beginner failure signatures.',
             '  --action=version          Show installer version and supported actions.',
             '',
@@ -293,6 +318,11 @@ const installer = {
             '  --policy-pack=/path               Record enterprise policy pack location.',
             '  --runtime=platform                Select runtime for logs.',
             '  --lines=80                        Number of log lines to show. Default: 80.',
+            '  --environment-name=acmeQa         Target environment for add-environment.',
+            '  --from-environment=acmeLocal      Source environment to copy. Default: first local environment.',
+            '  --module-name=acmeLoyalty         Target backend module for add-module.',
+            '  --site-name=acme.electronics      Target site for add-site.',
+            '  --site-type=commerce|company      Site template type for add-site. Default: commerce.',
             '  --json                            Print structured JSON.',
             '  --help                            Show this help.',
             '',
@@ -365,7 +395,13 @@ const installer = {
             offlineCache: this.readOption(args, '--offline-cache', ''),
             policyPack: this.readOption(args, '--policy-pack', ''),
             runtime: this.readOption(args, '--runtime', ''),
-            lines: Number(this.readOption(args, '--lines', '80')) || 80
+            lines: Number(this.readOption(args, '--lines', '80')) || 80,
+            environmentName: this.toNodicsIdentifier(this.readOption(args, '--environment-name', '')),
+            fromEnvironment: this.toNodicsIdentifier(this.readOption(args, '--from-environment', '')),
+            moduleName: this.toNodicsIdentifier(this.readOption(args, '--module-name', '')),
+            siteName: this.readOption(args, '--site-name', '') ?
+                this.toApplicationSlug(this.readOption(args, '--site-name', '')) : '',
+            siteType: this.readOption(args, '--site-type', 'commerce').toLowerCase()
         };
         options.application = this.createApplicationIdentity(options);
         return options;
@@ -522,7 +558,7 @@ const installer = {
             errors.push('Unknown accelerator `' + options.accelerator + '`. Use common, apparel, electronics, telco, or combined.');
         }
         if (!VALID_ACTIONS.has(options.action)) {
-            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, troubleshooting, or version.');
+            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, add-environment, add-module, add-site, troubleshooting, or version.');
         }
         if (!VALID_EXECUTION_LEVELS.has(options.executionLevel)) {
             errors.push('Unknown execution level `' + options.executionLevel + '`.');
@@ -535,6 +571,21 @@ const installer = {
         }
         if (options.journey === 'project') {
             errors.push('The custom project journey is documented but deferred until the reference local setup journey is stable.');
+        }
+        const validIdentifier = /^[a-z][A-Za-z0-9]*$/;
+        if (options.action === 'add-environment' && !validIdentifier.test(options.environmentName)) {
+            errors.push('add-environment requires --environment-name, for example --environment-name=acmeQa.');
+        }
+        if (options.action === 'add-module' && !validIdentifier.test(options.moduleName)) {
+            errors.push('add-module requires --module-name, for example --module-name=acmeLoyalty.');
+        }
+        if (options.action === 'add-site') {
+            if (!options.siteName || !validSlug.test(options.siteName)) {
+                errors.push('add-site requires --site-name, for example --site-name=acme.electronics.');
+            }
+            if (!VALID_SITE_TYPES.has(options.siteType)) {
+                errors.push('add-site requires --site-type=commerce or --site-type=company.');
+            }
         }
         if (options.workspace === path.parse(options.workspace).root || options.workspace === os.homedir()) {
             errors.push('Workspace must be a dedicated folder, not the filesystem root or home directory.');
@@ -1055,6 +1106,7 @@ const installer = {
     },
 
     writeJsonFile: function (filePath, value) {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n');
     },
 
@@ -1722,6 +1774,324 @@ const installer = {
         return fs.existsSync(projectJsonPath) ? this.readJsonFile(projectJsonPath) : null;
     },
 
+    updateProjectDescriptor: function (options, updater) {
+        const projectJsonPath = path.join(options.application.projectPath, 'nodics.project.json');
+        const projectJson = fs.existsSync(projectJsonPath) ? this.readJsonFile(projectJsonPath) : {};
+        const changed = updater(projectJson);
+        if (!changed) {
+            return [];
+        }
+        this.writeJsonFile(projectJsonPath, projectJson);
+        return [projectJsonPath];
+    },
+
+    appendUniqueValue: function (values, value) {
+        const nextValues = Array.isArray(values) ? values : [];
+        if (!nextValues.includes(value)) {
+            nextValues.push(value);
+            return true;
+        }
+        return false;
+    },
+
+    expansionEvidencePath: function (options) {
+        return path.join(options.workspace, '.nodics-installer', 'expansion-evidence.json');
+    },
+
+    requireSetupEvidence: function (plan, options) {
+        const evidence = this.readEvidence(plan.evidencePath);
+        if (!evidence) {
+            throw new Error('Expansion requires existing setup evidence. Run first setup before using ' + options.action + '.');
+        }
+        return evidence;
+    },
+
+    writeExpansionEvidence: function (options, entry) {
+        const evidencePath = this.expansionEvidencePath(options);
+        const evidence = this.readEvidence(evidencePath) || {
+            contractVersion: 1,
+            operation: 'local-expansion-evidence',
+            workspace: options.workspace,
+            application: options.application,
+            entries: []
+        };
+        evidence.workspace = options.workspace;
+        evidence.application = options.application;
+        evidence.entries.push({
+            ...entry,
+            timestamp: new Date().toISOString()
+        });
+        this.writeEvidence(evidencePath, evidence);
+        return evidencePath;
+    },
+
+    assertProjectReadyForExpansion: function (options) {
+        if (!fs.existsSync(options.application.projectPath)) {
+            throw new Error('Customer project is missing: ' + options.application.projectPath);
+        }
+        if (this.isGitCheckout(options.application.projectPath)) {
+            this.assertCleanCheckout(options.application.projectPath);
+        }
+    },
+
+    copyDirectory: function (sourcePath, targetPath) {
+        if (!fs.existsSync(sourcePath)) {
+            throw new Error('Source path is missing: ' + sourcePath);
+        }
+        if (fs.existsSync(targetPath)) {
+            throw new Error('Target path already exists: ' + targetPath);
+        }
+        fs.cpSync(sourcePath, targetPath, {
+            recursive: true,
+            filter: source => path.basename(source) !== 'node_modules'
+        });
+        return [targetPath];
+    },
+
+    updateProjectExpansionMetadata: function (options, key, value) {
+        return this.updateProjectDescriptor(options, projectJson => {
+            projectJson.expansions = projectJson.expansions || {};
+            projectJson.expansions[key] = projectJson.expansions[key] || [];
+            return this.appendUniqueValue(projectJson.expansions[key], value);
+        });
+    },
+
+    addEnvironment: function (plan, options) {
+        this.requireSetupEvidence(plan, options);
+        this.assertProjectReadyForExpansion(options);
+        const sourceEnvironment = options.fromEnvironment || this.initialProvisioning(options).environment;
+        const sourcePath = path.join(options.application.projectPath, 'envs', sourceEnvironment);
+        const targetPath = path.join(options.application.projectPath, 'envs', options.environmentName);
+        const changed = this.copyDirectory(sourcePath, targetPath);
+        changed.push(...this.collectRebrandableFiles(targetPath)
+            .filter(filePath => this.replaceTextInFile(filePath, [[sourceEnvironment, options.environmentName]])));
+        changed.push(...this.updateProjectExpansionMetadata(options, 'environments', {
+            name: options.environmentName,
+            source: sourceEnvironment,
+            mode: options.mode
+        }));
+        const evidencePath = this.writeExpansionEvidence(options, {
+            action: 'add-environment',
+            environmentName: options.environmentName,
+            fromEnvironment: sourceEnvironment,
+            changed: Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath))
+        });
+        return {
+            operation: 'local-expansion-add-environment',
+            ok: true,
+            environmentName: options.environmentName,
+            fromEnvironment: sourceEnvironment,
+            changed: Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath)),
+            evidencePath
+        };
+    },
+
+    addModule: function (plan, options) {
+        this.requireSetupEvidence(plan, options);
+        this.assertProjectReadyForExpansion(options);
+        const modulePath = path.join(options.application.projectPath, 'modules', options.moduleName);
+        if (fs.existsSync(modulePath)) {
+            throw new Error('Module already exists: ' + modulePath);
+        }
+        fs.mkdirSync(path.join(modulePath, 'config'), { recursive: true });
+        fs.mkdirSync(path.join(modulePath, 'src', 'service'), { recursive: true });
+        this.writeJsonFile(path.join(modulePath, 'package.json'), {
+            name: options.moduleName,
+            version: '0.0.0',
+            private: true,
+            nodics: {
+                kind: 'customer-module',
+                owner: options.application.projectName,
+                runtimeModule: true
+            }
+        });
+        fs.writeFileSync(path.join(modulePath, 'nodics.js'), [
+            "'use strict';",
+            '',
+            'module.exports = {',
+            '    init: function () {',
+            '        return Promise.resolve(true);',
+            '    },',
+            '    postInit: function () {',
+            '        return Promise.resolve(true);',
+            '    }',
+            '};',
+            ''
+        ].join('\n'));
+        fs.writeFileSync(path.join(modulePath, 'README.md'), [
+            '# ' + options.moduleName,
+            '',
+            'Customer module for ' + options.application.name + '.',
+            '',
+            'This module was added by `nodics.installer` after the first local setup.',
+            ''
+        ].join('\n'));
+        fs.writeFileSync(path.join(modulePath, 'AGENTS.md'), [
+            '# ' + options.moduleName + ' Agent Guide',
+            '',
+            'This is a customer-owned Nodics module inside `' + options.application.projectName + '`.',
+            'Read the project root `AGENTS.md` before changing this module.',
+            ''
+        ].join('\n'));
+        ['properties.js', 'prescripts.js', 'postscripts.js'].forEach(fileName => {
+            fs.writeFileSync(path.join(modulePath, 'config', fileName), "'use strict';\n\nmodule.exports = {};\n");
+        });
+        const changed = [
+            path.join(modulePath, 'package.json'),
+            path.join(modulePath, 'nodics.js'),
+            path.join(modulePath, 'README.md'),
+            path.join(modulePath, 'AGENTS.md'),
+            path.join(modulePath, 'config', 'properties.js'),
+            path.join(modulePath, 'config', 'prescripts.js'),
+            path.join(modulePath, 'config', 'postscripts.js')
+        ];
+        changed.push(...this.updateProjectExpansionMetadata(options, 'modules', {
+            name: options.moduleName,
+            kind: 'customer-module'
+        }));
+        const relativeChanged = Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath));
+        const evidencePath = this.writeExpansionEvidence(options, {
+            action: 'add-module',
+            moduleName: options.moduleName,
+            changed: relativeChanged
+        });
+        return {
+            operation: 'local-expansion-add-module',
+            ok: true,
+            moduleName: options.moduleName,
+            modulePath,
+            changed: relativeChanged,
+            evidencePath
+        };
+    },
+
+    siteTemplateForType: function (siteType) {
+        return siteType === 'company' ? FRONTEND_REPOSITORIES.companySiteTemplate :
+            FRONTEND_REPOSITORIES.applicationWebTemplate;
+    },
+
+    prepareExpansionSiteRepository: function (options) {
+        const template = this.siteTemplateForType(options.siteType);
+        const targetPath = path.join(options.workspace, options.siteName);
+        if (fs.existsSync(targetPath)) {
+            throw new Error('Site already exists: ' + targetPath);
+        }
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        if (options.cloneMode === 'existing') {
+            const sourcePath = path.join(options.workspace, template.name);
+            if (this.isGitCheckout(sourcePath)) {
+                this.assertCleanCheckout(sourcePath);
+            }
+            return this.copyDirectory(sourcePath, targetPath);
+        }
+        this.runCommand('git', ['clone', '--branch', options.release, this.resolveRepositoryUrl(template, options), targetPath],
+            { cwd: options.workspace, allowFailure: false });
+        return [targetPath];
+    },
+
+    addFrontendToProjectDescriptor: function (options) {
+        const siteCode = this.toLowerCamelIdentifier(options.siteName) + 'Site';
+        const label = this.toDisplayTitle(options.siteName, options.siteName);
+        return this.updateProjectDescriptor(options, projectJson => {
+            projectJson.topology = projectJson.topology || {};
+            projectJson.topology.groups = projectJson.topology.groups || {};
+            projectJson.topology.groups.frontends = projectJson.topology.groups.frontends || [];
+            const frontends = projectJson.topology.groups.frontends;
+            if (frontends.some(frontend => frontend.cwd === '{workspaceRoot}/' + options.siteName ||
+                frontend.code === siteCode)) {
+                return false;
+            }
+            frontends.push({
+                code: siteCode,
+                label,
+                type: options.siteType + '-site',
+                cwd: '{workspaceRoot}/' + options.siteName
+            });
+            return true;
+        });
+    },
+
+    appendProjectEnvRoot: function (options, sitePath) {
+        const envPath = path.join(options.application.projectPath, '.env');
+        const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+        const key = 'NODICS_ADDITIONAL_SITE_ROOTS';
+        const relativeSite = '../' + path.basename(sitePath);
+        const match = existing.match(new RegExp('^' + key + '=(.*)$', 'm'));
+        const values = match && match[1] ? match[1].split(',').map(value => value.trim()).filter(Boolean) : [];
+        if (!values.includes(relativeSite)) {
+            values.push(relativeSite);
+        }
+        return this.upsertEnvFile(envPath, { [key]: values.join(',') }, path.join(options.application.projectPath, '.env.example'));
+    },
+
+    addSite: function (plan, options) {
+        this.requireSetupEvidence(plan, options);
+        this.assertProjectReadyForExpansion(options);
+        const targetPath = path.join(options.workspace, options.siteName);
+        const changed = this.prepareExpansionSiteRepository(options);
+        const title = this.toDisplayTitle(options.siteName, options.siteName);
+        changed.push(...this.updatePackageName(targetPath, options.siteName, title));
+        changed.push(this.writeInstallerIdentity(targetPath, {
+            kind: options.siteType + '-site',
+            applicationName: options.application.name,
+            siteName: options.siteName,
+            siteTitle: title,
+            accelerator: options.siteType === 'commerce' ? options.accelerator : undefined
+        }));
+        const replacements = options.siteType === 'company' ? [
+            ['nodics.nexus', options.siteName],
+            ['Nodics Nexus', title],
+            ['Nexus', title]
+        ] : [
+            ['nodics.agora', options.siteName],
+            ['Nodics Agora', title],
+            ['Agora', title]
+        ];
+        ['README.md', 'index.html', '.env.example'].forEach(fileName => {
+            const filePath = path.join(targetPath, fileName);
+            if (this.replaceTextInFile(filePath, replacements)) {
+                changed.push(filePath);
+            }
+        });
+        if (options.siteType === 'commerce') {
+            changed.push(this.upsertEnvFile(path.join(targetPath, '.env'), {
+                AGORA_SOLUTION: options.accelerator === 'common' ? 'commerce' : options.accelerator,
+                VITE_STOREFRONT_COMMERCE_PROXY_TARGET: 'http://localhost:4350'
+            }, path.join(targetPath, '.env.example')));
+        } else {
+            changed.push(this.upsertEnvFile(path.join(targetPath, '.env'), {
+                NEXUS_AXIS_BASE_URL: 'http://localhost:3100',
+                NEXUS_PLATFORM_BASE_URL: 'http://localhost:4300',
+                NEXUS_ENTERPRISE_CODE: 'default',
+                NEXUS_DEFAULT_LOCALE: 'en',
+                NEXUS_CHANNEL: 'web'
+            }, path.join(targetPath, '.env.example')));
+        }
+        changed.push(...this.addFrontendToProjectDescriptor(options));
+        changed.push(...this.updateProjectExpansionMetadata(options, 'sites', {
+            name: options.siteName,
+            type: options.siteType,
+            accelerator: options.siteType === 'commerce' ? options.accelerator : undefined
+        }));
+        changed.push(this.appendProjectEnvRoot(options, targetPath));
+        const relativeChanged = Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath));
+        const evidencePath = this.writeExpansionEvidence(options, {
+            action: 'add-site',
+            siteName: options.siteName,
+            siteType: options.siteType,
+            changed: relativeChanged
+        });
+        return {
+            operation: 'local-expansion-add-site',
+            ok: true,
+            siteName: options.siteName,
+            siteType: options.siteType,
+            sitePath: targetPath,
+            changed: relativeChanged,
+            evidencePath
+        };
+    },
+
     repositoryStatus: function (repository) {
         const exists = fs.existsSync(repository.targetPath);
         const gitCheckout = exists && this.isGitCheckout(repository.targetPath);
@@ -2264,6 +2634,24 @@ const installer = {
             const result = this.cleanGeneratedRuntime(options);
             this.printResult(options, result, clean => 'Nodics generated runtime clean completed\nRemoved: ' +
                 (clean.removed.length ? clean.removed.join('\n') : 'nothing'));
+            return true;
+        }
+        if (options.action === 'add-environment') {
+            const result = this.addEnvironment(plan, options);
+            this.printResult(options, result, expansion => 'Nodics environment added\nEnvironment: ' +
+                expansion.environmentName + '\nEvidence: ' + expansion.evidencePath);
+            return true;
+        }
+        if (options.action === 'add-module') {
+            const result = this.addModule(plan, options);
+            this.printResult(options, result, expansion => 'Nodics module added\nModule: ' +
+                expansion.moduleName + '\nEvidence: ' + expansion.evidencePath);
+            return true;
+        }
+        if (options.action === 'add-site') {
+            const result = this.addSite(plan, options);
+            this.printResult(options, result, expansion => 'Nodics site added\nSite: ' +
+                expansion.siteName + '\nEvidence: ' + expansion.evidencePath);
             return true;
         }
         if (options.action === 'execute') {

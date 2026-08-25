@@ -198,6 +198,21 @@ test('rejects unsafe or deferred execution paths', () => {
         '--application-name=Acme',
         '--project-name=acme.project'
     ])), /Backend project name must be specific/);
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--action=add-environment',
+        '--yes'
+    ])), /add-environment requires --environment-name/);
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--action=add-module',
+        '--yes'
+    ])), /add-module requires --module-name/);
+    assert.throws(() => installer.createSetupPlan(installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--action=add-site',
+        '--yes'
+    ])), /add-site requires --site-name/);
 });
 
 test('questionnaire answers merge into normal options', async () => {
@@ -624,8 +639,12 @@ test('version action exposes supported actions without requiring workspace valid
     assert.equal(result.version, '0.7.0');
     assert(result.actions.includes('status'));
     assert(result.actions.includes('repair'));
+    assert(result.actions.includes('add-environment'));
+    assert(result.actions.includes('add-module'));
+    assert(result.actions.includes('add-site'));
     assert(result.actions.includes('troubleshooting'));
     assert(result.mutatingActions.includes('clean'));
+    assert(result.mutatingActions.includes('add-site'));
     assert.match(installer.renderVersion(result), /Mutating actions require --yes/);
 });
 
@@ -807,6 +826,132 @@ test('clean refuses while topology is ready', () => {
     assert.throws(() => service.cleanGeneratedRuntime(options), /Refusing to clean/);
 });
 
+test('add-environment copies one requested environment and writes expansion evidence', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-add-env-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--action=add-environment',
+        '--environment-name=acmeQa',
+        '--yes'
+    ]);
+    const plan = installer.createSetupPlan(options);
+    const sourceConfigPath = path.join(options.application.projectPath, 'envs', 'acmeLocal', 'platformServer', 'config');
+    fs.mkdirSync(sourceConfigPath, { recursive: true });
+    fs.writeFileSync(path.join(sourceConfigPath, 'properties.js'), "module.exports = { environment: 'acmeLocal' };\n");
+    installer.writeEvidence(plan.evidencePath, installer.createEvidence(plan, options));
+
+    const result = installer.addEnvironment(plan, options);
+
+    assert.equal(result.operation, 'local-expansion-add-environment');
+    assert.equal(result.environmentName, 'acmeQa');
+    assert(fs.existsSync(path.join(options.application.projectPath, 'envs', 'acmeQa')));
+    assert.match(fs.readFileSync(path.join(options.application.projectPath, 'envs', 'acmeQa', 'platformServer', 'config', 'properties.js'), 'utf8'), /acmeQa/);
+    const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
+    assert.deepEqual(descriptor.expansions.environments[0], {
+        name: 'acmeQa',
+        source: 'acmeLocal',
+        mode: 'node'
+    });
+    const evidence = installer.readEvidence(result.evidencePath);
+    assert.equal(evidence.entries[0].action, 'add-environment');
+});
+
+test('add-module creates a module-shaped customer backend module', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-add-module-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--action=add-module',
+        '--module-name=acmeLoyalty',
+        '--yes'
+    ]);
+    const plan = installer.createSetupPlan(options);
+    fs.mkdirSync(options.application.projectPath, { recursive: true });
+    installer.writeEvidence(plan.evidencePath, installer.createEvidence(plan, options));
+
+    const result = installer.addModule(plan, options);
+
+    assert.equal(result.operation, 'local-expansion-add-module');
+    assert.equal(result.moduleName, 'acmeLoyalty');
+    const modulePath = path.join(options.application.projectPath, 'modules', 'acmeLoyalty');
+    assert(fs.existsSync(path.join(modulePath, 'package.json')));
+    assert(fs.existsSync(path.join(modulePath, 'nodics.js')));
+    assert(fs.existsSync(path.join(modulePath, 'README.md')));
+    assert(fs.existsSync(path.join(modulePath, 'AGENTS.md')));
+    assert(fs.existsSync(path.join(modulePath, 'config', 'properties.js')));
+    const packageJson = installer.readJsonFile(path.join(modulePath, 'package.json'));
+    assert.equal(packageJson.name, 'acmeLoyalty');
+    assert.equal(packageJson.nodics.runtimeModule, true);
+    const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
+    assert.deepEqual(descriptor.expansions.modules[0], {
+        name: 'acmeLoyalty',
+        kind: 'customer-module'
+    });
+});
+
+test('add-site creates one requested customer site from template and records topology metadata', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-add-site-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--action=add-site',
+        '--site-name=acme.electronics',
+        '--site-type=commerce',
+        '--accelerator=electronics',
+        '--clone=existing',
+        '--yes'
+    ]);
+    const plan = installer.createSetupPlan(options);
+    fs.mkdirSync(options.application.projectPath, { recursive: true });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
+        topology: {
+            groups: {
+                frontends: [
+                    { code: 'axis', label: 'Axis', cwd: '{workspaceRoot}/nodics.axis' }
+                ]
+            }
+        }
+    });
+    fs.writeFileSync(path.join(options.application.projectPath, '.env.example'), 'NODICS_FRAMEWORK_ROOT=../nodics.ai\n');
+    const templatePath = path.join(workspace, 'nodics.agora');
+    fs.mkdirSync(templatePath, { recursive: true });
+    fs.writeFileSync(path.join(templatePath, 'package.json'), JSON.stringify({
+        name: 'nodics.agora',
+        version: '0.0.0'
+    }, null, 2));
+    fs.writeFileSync(path.join(templatePath, 'README.md'), '# Nodics Agora\n');
+    fs.writeFileSync(path.join(templatePath, 'index.html'), '<title>Agora</title>\n');
+    fs.writeFileSync(path.join(templatePath, '.env.example'), 'AGORA_SOLUTION=apparel\n');
+    installer.writeEvidence(plan.evidencePath, installer.createEvidence(plan, options));
+
+    const result = installer.addSite(plan, options);
+
+    assert.equal(result.operation, 'local-expansion-add-site');
+    assert.equal(result.siteName, 'acme.electronics');
+    assert.equal(result.siteType, 'commerce');
+    const sitePath = path.join(workspace, 'acme.electronics');
+    assert.equal(installer.readJsonFile(path.join(sitePath, 'package.json')).name, 'acme.electronics');
+    assert.match(fs.readFileSync(path.join(sitePath, 'README.md'), 'utf8'), /Acme Electronics/);
+    assert.match(fs.readFileSync(path.join(sitePath, '.env'), 'utf8'), /AGORA_SOLUTION=electronics/);
+    const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
+    assert(descriptor.topology.groups.frontends.some(frontend =>
+        frontend.code === 'acmeElectronicsSite' &&
+        frontend.cwd === '{workspaceRoot}/acme.electronics'));
+    assert.deepEqual(descriptor.expansions.sites[0], {
+        name: 'acme.electronics',
+        type: 'commerce',
+        accelerator: 'electronics'
+    });
+    assert.match(fs.readFileSync(path.join(options.application.projectPath, '.env'), 'utf8'),
+        /NODICS_ADDITIONAL_SITE_ROOTS=..\/acme\.electronics/);
+    const evidence = installer.readEvidence(result.evidencePath);
+    assert.equal(evidence.entries[0].action, 'add-site');
+});
+
 test('CLI prints structured JSON', () => {
     const output = childProcess.execFileSync(process.execPath,
         [path.join(repoRoot, 'bin', 'nodics-installer.js'), '--workspace=/tmp/nodicsRoot', '--json'],
@@ -815,6 +960,26 @@ test('CLI prints structured JSON', () => {
     assert.equal(parsed.operation, 'local-setup-plan');
     assert.equal(parsed.installer.packageName, '@nodics/installer');
     assert.equal(parsed.installer.version, '0.7.0');
+});
+
+test('CLI prints beginner-readable JSON errors without stack traces', () => {
+    assert.throws(() => childProcess.execFileSync(process.execPath, [
+        path.join(repoRoot, 'bin', 'nodics-installer.js'),
+        '--workspace=/tmp/nodicsRoot',
+        '--action=add-site',
+        '--yes',
+        '--site-name=acme.electronics',
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--json'
+    ], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), error => {
+        const parsed = JSON.parse(error.stderr);
+        assert.equal(parsed.operation, 'local-installer-error');
+        assert.equal(parsed.ok, false);
+        assert.match(parsed.error, /Expansion requires existing setup evidence/);
+        assert.doesNotMatch(error.stderr, /at Object\./);
+        return true;
+    });
 });
 
 test('release workflow validates installer package', () => {
