@@ -21,6 +21,7 @@ const readline = require('node:readline');
 const VERSION = '0.7.0';
 const REBRAND_STAGE_VERSION = VERSION + ':project-runtime-identity-v6';
 const START_STAGE_VERSION = VERSION + ':detached-topology-start-v1';
+const VENDOR_BOUNDARY_STAGE_VERSION = VERSION + ':vendor-boundary-v1';
 const VALID_JOURNEYS = new Set(['reference', 'project']);
 const VALID_MODES = new Set(['node', 'docker']);
 const VALID_APPS = new Set(['axis']);
@@ -146,6 +147,7 @@ const installer = {
     toDisplayTitle: function (value, fallback) {
         const source = String(value || fallback || 'My Nodics App')
             .trim()
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
             .replace(/[._-]+/g, ' ')
             .replace(/\s+/g, ' ');
         return source.split(' ')
@@ -1205,6 +1207,44 @@ const installer = {
         }
     },
 
+    vendorRepositoryPaths: function (options) {
+        return VENDOR_OWNED_REPOSITORIES
+            .map(repository => path.join(options.workspace, repository))
+            .filter(repositoryPath => fs.existsSync(repositoryPath));
+    },
+
+    vendorBoundaryStatus: function (options) {
+        const forbiddenFiles = ['.env', '.nodics-installer-identity.json'];
+        const repositories = this.vendorRepositoryPaths(options).map(repositoryPath => {
+            const result = {
+                name: path.basename(repositoryPath),
+                path: repositoryPath,
+                gitCheckout: this.isGitCheckout(repositoryPath),
+                forbiddenFiles: forbiddenFiles.filter(fileName => fs.existsSync(path.join(repositoryPath, fileName)))
+            };
+            if (result.gitCheckout) {
+                const status = this.runCommand('git', ['status', '--short'], { cwd: repositoryPath, allowFailure: false });
+                result.dirty = Boolean(status.stdout.trim());
+            }
+            return result;
+        });
+        const violations = repositories.filter(repository => repository.dirty || repository.forbiddenFiles.length > 0);
+        if (violations.length > 0) {
+            throw new Error('Vendor-owned repository boundary violation: ' + violations
+                .map(repository => repository.name + (repository.forbiddenFiles.length ?
+                    ' forbidden files: ' + repository.forbiddenFiles.join(', ') : ' dirty checkout'))
+                .join('; '));
+        }
+        return {
+            ok: true,
+            repositories
+        };
+    },
+
+    assertVendorRepositoriesUnmodified: function (options) {
+        return this.vendorBoundaryStatus(options);
+    },
+
     switchRelease: function (targetPath, release) {
         const localSwitch = this.runCommand('git', ['switch', release], { cwd: targetPath, allowFailure: true });
         if (localSwitch.status === 'passed') {
@@ -1367,27 +1407,6 @@ const installer = {
 
     configureFrontendEnvironmentFiles: function (options) {
         const changed = [];
-        if (options.apps.includes('axis')) {
-            changed.push(this.upsertEnvFile(
-                path.join(options.application.axisPath, '.env'),
-                {
-                    AXIS_BACKOFFICE_BASE_URL: 'http://localhost:4300',
-                    AXIS_ENTERPRISE_CODE: 'default',
-                    AXIS_PROJECT_CODE: options.application.projectName,
-                    AXIS_CLIENT_CONTRACT_VERSION: '0',
-                    AXIS_REQUEST_TIMEOUT_MS: '10000',
-                    AXIS_BROWSER_SESSION_CSRF_COOKIE_NAME: 'nodics_axis_csrf',
-                    AXIS_ASSISTANT_MAXIMUM_EVENT_BYTES: '65536',
-                    AXIS_ASSISTANT_RECONNECT_WINDOW_MS: '120000',
-                    AXIS_ASSISTANT_IDLE_TIMEOUT_MS: '45000',
-                    AXIS_DEV_HOST: '0.0.0.0',
-                    AXIS_DEV_PORT: '3100',
-                    AXIS_STRICT_PORT: 'true',
-                    AXIS_BUILD_SOURCEMAP: 'true'
-                },
-                path.join(options.application.axisPath, '.env.example')
-            ));
-        }
         if (options.companySite) {
             changed.push(this.upsertEnvFile(
                 path.join(options.application.companySitePath, '.env'),
@@ -1420,6 +1439,36 @@ const installer = {
             ));
         }
         return changed.filter(Boolean);
+    },
+
+    axisRuntimeEnvironment: function (options) {
+        return {
+            AXIS_BACKOFFICE_BASE_URL: 'http://localhost:4300',
+            AXIS_ENTERPRISE_CODE: 'default',
+            AXIS_PROJECT_CODE: options.application.projectName,
+            AXIS_CLIENT_CONTRACT_VERSION: '0',
+            AXIS_REQUEST_TIMEOUT_MS: '10000',
+            AXIS_BROWSER_SESSION_CSRF_COOKIE_NAME: 'nodics_axis_csrf',
+            AXIS_ASSISTANT_MAXIMUM_EVENT_BYTES: '65536',
+            AXIS_ASSISTANT_RECONNECT_WINDOW_MS: '120000',
+            AXIS_ASSISTANT_IDLE_TIMEOUT_MS: '45000',
+            AXIS_DEV_HOST: '0.0.0.0',
+            AXIS_DEV_PORT: '3100',
+            AXIS_STRICT_PORT: 'true',
+            AXIS_BUILD_SOURCEMAP: 'true'
+        };
+    },
+
+    axisRuntimeCommand: function (options) {
+        return {
+            command: 'env',
+            args: [
+                ...Object.entries(this.axisRuntimeEnvironment(options)).map(([key, value]) => key + '=' + value),
+                'npm',
+                'run',
+                'dev'
+            ]
+        };
     },
 
     updatePackageName: function (rootPath, packageName, displayName) {
@@ -1464,7 +1513,8 @@ const installer = {
         const frontendTargets = {
             axis: {
                 label: 'Axis',
-                cwd: '{workspaceRoot}/' + path.basename(options.application.axisPath)
+                cwd: '{workspaceRoot}/' + path.basename(options.application.axisPath),
+                ...this.axisRuntimeCommand(options)
             },
             nexus: {
                 code: 'companySite',
@@ -1875,9 +1925,7 @@ const installer = {
         if (!fs.existsSync(options.application.projectPath)) {
             throw new Error('Customer project is missing: ' + options.application.projectPath);
         }
-        if (this.isGitCheckout(options.application.projectPath)) {
-            this.assertCleanCheckout(options.application.projectPath);
-        }
+        this.assertVendorRepositoriesUnmodified(options);
     },
 
     copyDirectory: function (sourcePath, targetPath) {
@@ -1892,6 +1940,76 @@ const installer = {
             filter: source => path.basename(source) !== 'node_modules'
         });
         return [targetPath];
+    },
+
+    collectPackageJsonFiles: function (rootPath) {
+        const files = [];
+        const visit = currentPath => {
+            const entries = fs.existsSync(currentPath) ? fs.readdirSync(currentPath, { withFileTypes: true }) : [];
+            entries.forEach(entry => {
+                const entryPath = path.join(currentPath, entry.name);
+                if (entry.isDirectory()) {
+                    if (entry.name !== 'node_modules' && entry.name !== '.git') {
+                        visit(entryPath);
+                    }
+                    return;
+                }
+                if (entry.isFile() && entry.name === 'package.json') {
+                    files.push(entryPath);
+                }
+            });
+        };
+        visit(rootPath);
+        return files;
+    },
+
+    nextEnvironmentIndexBase: function (options, targetPath) {
+        const envsPath = path.join(options.application.projectPath, 'envs');
+        const bases = this.collectPackageJsonFiles(envsPath)
+            .filter(filePath => {
+                const relativePath = path.relative(targetPath, filePath);
+                return relativePath.startsWith('..') || path.isAbsolute(relativePath);
+            })
+            .map(filePath => {
+                try { return Math.floor(Number(this.readJsonFile(filePath).index)); } catch { return 0; }
+            })
+            .filter(index => Number.isInteger(index) && index > 0);
+        return bases.length ? Math.max(...bases) + 1 : 1001;
+    },
+
+    reindexEnvironmentModules: function (targetPath, options) {
+        const nextBase = this.nextEnvironmentIndexBase(options, targetPath);
+        const changed = [];
+        this.collectPackageJsonFiles(targetPath).forEach(filePath => {
+            const packageJson = this.readJsonFile(filePath);
+            if (packageJson.index === undefined || packageJson.index === null) {
+                return;
+            }
+            const currentIndex = String(packageJson.index);
+            const numericIndex = Number(currentIndex);
+            if (!Number.isFinite(numericIndex)) {
+                return;
+            }
+            const suffix = currentIndex.includes('.') ? currentIndex.slice(currentIndex.indexOf('.')) : '';
+            const nextIndex = String(nextBase) + suffix;
+            if (currentIndex !== nextIndex) {
+                packageJson.index = nextIndex;
+                this.writeJsonFile(filePath, packageJson);
+                changed.push(filePath);
+            }
+        });
+        return changed;
+    },
+
+    nextCustomerModuleIndex: function (options) {
+        const modulesPath = path.join(options.application.projectPath, 'modules');
+        const indexes = this.collectPackageJsonFiles(modulesPath)
+            .map(filePath => {
+                try { return Number(this.readJsonFile(filePath).index); } catch { return 0; }
+            })
+            .filter(index => Number.isFinite(index) && index > 0);
+        const nextIndex = (indexes.length ? Math.max(...indexes) : 3100.13) + 0.01;
+        return nextIndex.toFixed(2);
     },
 
     updateProjectExpansionMetadata: function (options, key, value) {
@@ -1911,6 +2029,7 @@ const installer = {
         const changed = this.copyDirectory(sourcePath, targetPath);
         changed.push(...this.collectRebrandableFiles(targetPath)
             .filter(filePath => this.replaceTextInFile(filePath, [[sourceEnvironment, options.environmentName]])));
+        changed.push(...this.reindexEnvironmentModules(targetPath, options));
         changed.push(...this.updateProjectExpansionMetadata(options, 'environments', {
             name: options.environmentName,
             source: sourceEnvironment,
@@ -1943,12 +2062,37 @@ const installer = {
         fs.mkdirSync(path.join(modulePath, 'src', 'service'), { recursive: true });
         this.writeJsonFile(path.join(modulePath, 'package.json'), {
             name: options.moduleName,
+            index: this.nextCustomerModuleIndex(options),
+            description: this.toDisplayTitle(options.moduleName, options.moduleName) + ' customer capability module.',
+            homepage: 'http://www.nodics.com/',
+            keywords: [
+                options.moduleName
+            ],
+            author: 'Nodics',
+            main: 'nodics.js',
             version: '0.0.0',
             private: true,
+            license: 'SEE LICENSE IN LICENSE',
+            repository: {
+                type: 'git',
+                url: 'https://github.com/Nodics/' + options.application.projectName + '.git'
+            },
+            dependencies: {},
             nodics: {
-                kind: 'customer-module',
+                kind: 'capability',
                 owner: options.application.projectName,
-                runtimeModule: true
+                runtimeModule: true,
+                loadableByNodicsModuleLoader: true,
+                owns: [
+                    'configuration',
+                    'llm'
+                ],
+                runtime: {
+                    router: false,
+                    publish: false,
+                    web: false
+                },
+                displayName: this.toDisplayTitle(options.moduleName, options.moduleName)
             }
         });
         fs.writeFileSync(path.join(modulePath, 'nodics.js'), [
@@ -2035,7 +2179,19 @@ const installer = {
         return [targetPath];
     },
 
-    addFrontendToProjectDescriptor: function (options) {
+    nextFrontendPort: function (projectJson) {
+        const frontends = projectJson &&
+            projectJson.topology &&
+            projectJson.topology.groups &&
+            Array.isArray(projectJson.topology.groups.frontends) ?
+            projectJson.topology.groups.frontends : [];
+        const ports = frontends
+            .map(frontend => Number(frontend.port))
+            .filter(port => Number.isInteger(port) && port > 0);
+        return ports.length ? Math.max(...ports) + 100 : 3100;
+    },
+
+    addFrontendToProjectDescriptor: function (options, port) {
         const siteCode = this.toLowerCamelIdentifier(options.siteName) + 'Site';
         const label = this.toDisplayTitle(options.siteName, options.siteName);
         return this.updateProjectDescriptor(options, projectJson => {
@@ -2051,7 +2207,13 @@ const installer = {
                 code: siteCode,
                 label,
                 type: options.siteType + '-site',
-                cwd: '{workspaceRoot}/' + options.siteName
+                command: 'npm',
+                args: options.siteType === 'commerce' ?
+                    ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port)] :
+                    ['run', 'dev'],
+                cwd: '{workspaceRoot}/' + options.siteName,
+                port,
+                readyPath: '/'
             });
             return true;
         });
@@ -2076,6 +2238,7 @@ const installer = {
         const targetPath = path.join(options.workspace, options.siteName);
         const changed = this.prepareExpansionSiteRepository(options);
         const title = this.toDisplayTitle(options.siteName, options.siteName);
+        const frontendPort = this.nextFrontendPort(this.readProjectDescriptor(options));
         changed.push(...this.updatePackageName(targetPath, options.siteName, title));
         changed.push(this.writeInstallerIdentity(targetPath, {
             kind: options.siteType + '-site',
@@ -2110,10 +2273,14 @@ const installer = {
                 NEXUS_PLATFORM_BASE_URL: 'http://localhost:4300',
                 NEXUS_ENTERPRISE_CODE: 'default',
                 NEXUS_DEFAULT_LOCALE: 'en',
-                NEXUS_CHANNEL: 'web'
+                NEXUS_CHANNEL: 'web',
+                NEXUS_DEV_HOST: '0.0.0.0',
+                NEXUS_DEV_PORT: String(frontendPort),
+                NEXUS_STRICT_PORT: 'true'
             }, path.join(targetPath, '.env.example')));
         }
-        changed.push(...this.addFrontendToProjectDescriptor(options));
+        changed.push(...this.addFrontendToProjectDescriptor(options, frontendPort));
+        const install = this.packageInstallCommand(targetPath, options);
         changed.push(...this.updateProjectExpansionMetadata(options, 'sites', {
             name: options.siteName,
             type: options.siteType,
@@ -2133,6 +2300,8 @@ const installer = {
             siteName: options.siteName,
             siteType: options.siteType,
             sitePath: targetPath,
+            frontendPort,
+            install,
             changed: relativeChanged,
             evidencePath
         };
@@ -2462,6 +2631,7 @@ const installer = {
         };
         runStage('download', 'Download or reuse repositories', () => this.prepareRepositories(plan, options));
         runStage('rebrand', 'Apply application identity', () => this.rebrandGeneratedApplications(plan, options), REBRAND_STAGE_VERSION);
+        runStage('vendor-boundary', 'Verify vendor repository boundary', () => this.assertVendorRepositoriesUnmodified(options), VENDOR_BOUNDARY_STAGE_VERSION);
         if (options.executionLevel === 'download') {
             evidence.finishedAt = new Date().toISOString();
             this.writeEvidence(plan.evidencePath, evidence);

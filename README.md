@@ -254,6 +254,10 @@ them, and sync them to an approved branch or tag. Required product changes
 should be reported upstream to Nodics instead of patched locally in a customer
 workspace.
 
+The installer does not write customer `.env` files or installer identity files
+inside `nodics.ai` or `nodics.axis`. Axis local runtime values are injected from
+the named customer project topology when Axis is started.
+
 The custom project journey is intentionally still blocked. The installer reports
 that path as deferred until the reference local setup is stable enough to become
 the reusable base for project creation.
@@ -704,9 +708,14 @@ operations setup contract:
 - prerequisite, doctor, and port preflight;
 - safe clone/reuse execution;
 - template rebranding, first local environment renaming, and local identity files;
-- expansion actions for one environment, module, or site at a time;
+- expansion actions for one environment, module, or site at a time, including
+  copied-environment index isolation, generated module runtime metadata,
+  new-site topology ports, and dependency installation;
 - framework-first dependency installation;
 - application `.env` framework and identity linking;
+- Axis launch-time environment injection from the customer topology without
+  writing customer config into `nodics.axis`;
+- vendor-owned repository boundary verification;
 - dependency install orchestration;
 - resumable setup evidence;
 - status, logs, start, stop, restart, initialize, acceptance, repair, clean, and version actions;

@@ -357,6 +357,7 @@ test('execute writes resumable evidence with injected stages', async () => {
     assert.deepEqual(evidence.steps.map(step => step.code), [
         'download',
         'rebrand',
+        'vendor-boundary',
         'install-framework',
         'configure',
         'install',
@@ -433,11 +434,36 @@ test('rebrand rewrites generated topology frontend roots', () => {
     assert.deepEqual(projectJson.topology.groups.frontends.map(frontend => ({
         code: frontend.code,
         label: frontend.label,
-        cwd: frontend.cwd
+        cwd: frontend.cwd,
+        command: frontend.command,
+        args: frontend.args
     })), [
-        { code: 'axis', label: 'Axis', cwd: '{workspaceRoot}/nodics.axis' },
-        { code: 'companySite', label: 'Acme Web', cwd: '{workspaceRoot}/acme.web' },
-        { code: 'commerceSite', label: 'Acme Apparel', cwd: '{workspaceRoot}/acme.apparel' }
+        {
+            code: 'axis',
+            label: 'Axis',
+            cwd: '{workspaceRoot}/nodics.axis',
+            command: 'env',
+            args: [
+                'AXIS_BACKOFFICE_BASE_URL=http://localhost:4300',
+                'AXIS_ENTERPRISE_CODE=default',
+                'AXIS_PROJECT_CODE=acme.startio',
+                'AXIS_CLIENT_CONTRACT_VERSION=0',
+                'AXIS_REQUEST_TIMEOUT_MS=10000',
+                'AXIS_BROWSER_SESSION_CSRF_COOKIE_NAME=nodics_axis_csrf',
+                'AXIS_ASSISTANT_MAXIMUM_EVENT_BYTES=65536',
+                'AXIS_ASSISTANT_RECONNECT_WINDOW_MS=120000',
+                'AXIS_ASSISTANT_IDLE_TIMEOUT_MS=45000',
+                'AXIS_DEV_HOST=0.0.0.0',
+                'AXIS_DEV_PORT=3100',
+                'AXIS_STRICT_PORT=true',
+                'AXIS_BUILD_SOURCEMAP=true',
+                'npm',
+                'run',
+                'dev'
+            ]
+        },
+        { code: 'companySite', label: 'Acme Web', cwd: '{workspaceRoot}/acme.web', command: undefined, args: undefined },
+        { code: 'commerceSite', label: 'Acme Apparel', cwd: '{workspaceRoot}/acme.apparel', command: undefined, args: undefined }
     ]);
     const renamedServerConfigPath = path.join(projectPath, 'envs', 'acmeLocal', 'platformServer', 'config');
     assert(!fs.existsSync(path.join(projectPath, 'modules', 'kickoffCore')));
@@ -454,7 +480,7 @@ test('rebrand rewrites generated topology frontend roots', () => {
     assert.match(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /'acmeCore'/);
     assert.doesNotMatch(fs.readFileSync(path.join(renamedServerConfigPath, 'properties.js'), 'utf8'), /kickoffCore|kickoffLocal/);
     assert.match(fs.readFileSync(path.join(dataPath, 'content.js'), 'utf8'), /nodics\.kickoff checksum payload/);
-    assert.match(fs.readFileSync(path.join(axisPath, '.env'), 'utf8'), /AXIS_PROJECT_CODE=acme\.startio/);
+    assert(!fs.existsSync(path.join(axisPath, '.env')));
     assert.match(fs.readFileSync(path.join(companyPath, '.env'), 'utf8'), /NEXUS_PLATFORM_BASE_URL=http:\/\/localhost:4300/);
     assert.match(fs.readFileSync(path.join(commercePath, '.env'), 'utf8'), /AGORA_SOLUTION=apparel/);
 });
@@ -841,6 +867,25 @@ test('clean refuses while topology is ready', () => {
     assert.throws(() => service.cleanGeneratedRuntime(options), /Refusing to clean/);
 });
 
+test('expansion allows generated customer changes but rejects vendor repository changes', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-vendor-boundary-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio'
+    ]);
+    fs.mkdirSync(options.application.projectPath, { recursive: true });
+    childProcess.execFileSync('git', ['init'], { cwd: options.application.projectPath, stdio: 'ignore' });
+    fs.writeFileSync(path.join(options.application.projectPath, 'generated-change.txt'), 'customer-owned\n');
+    assert.doesNotThrow(() => installer.assertProjectReadyForExpansion(options));
+
+    const axisPath = path.join(workspace, 'nodics.axis');
+    fs.mkdirSync(axisPath, { recursive: true });
+    childProcess.execFileSync('git', ['init'], { cwd: axisPath, stdio: 'ignore' });
+    fs.writeFileSync(path.join(axisPath, '.env'), 'AXIS_PROJECT_CODE=acme.startio\n');
+    assert.throws(() => installer.assertProjectReadyForExpansion(options), /Vendor-owned repository boundary violation/);
+});
+
 test('add-environment copies one requested environment and writes expansion evidence', () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-add-env-'));
     const options = installer.parseOptions([
@@ -855,6 +900,14 @@ test('add-environment copies one requested environment and writes expansion evid
     const sourceConfigPath = path.join(options.application.projectPath, 'envs', 'acmeLocal', 'platformServer', 'config');
     fs.mkdirSync(sourceConfigPath, { recursive: true });
     fs.writeFileSync(path.join(sourceConfigPath, 'properties.js'), "module.exports = { environment: 'acmeLocal' };\n");
+    installer.writeJsonFile(path.join(options.application.projectPath, 'envs', 'acmeLocal', 'package.json'), {
+        name: 'acmeLocal',
+        index: '1001.10'
+    });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'envs', 'acmeLocal', 'platformServer', 'package.json'), {
+        name: 'platformServer',
+        index: '1001.11'
+    });
     installer.writeEvidence(plan.evidencePath, installer.createEvidence(plan, options));
 
     const result = installer.addEnvironment(plan, options);
@@ -863,6 +916,8 @@ test('add-environment copies one requested environment and writes expansion evid
     assert.equal(result.environmentName, 'acmeQa');
     assert(fs.existsSync(path.join(options.application.projectPath, 'envs', 'acmeQa')));
     assert.match(fs.readFileSync(path.join(options.application.projectPath, 'envs', 'acmeQa', 'platformServer', 'config', 'properties.js'), 'utf8'), /acmeQa/);
+    assert.equal(installer.readJsonFile(path.join(options.application.projectPath, 'envs', 'acmeQa', 'package.json')).index, '1002.10');
+    assert.equal(installer.readJsonFile(path.join(options.application.projectPath, 'envs', 'acmeQa', 'platformServer', 'package.json')).index, '1002.11');
     const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
     assert.deepEqual(descriptor.expansions.environments[0], {
         name: 'acmeQa',
@@ -899,7 +954,11 @@ test('add-module creates a module-shaped customer backend module', () => {
     assert(fs.existsSync(path.join(modulePath, 'config', 'properties.js')));
     const packageJson = installer.readJsonFile(path.join(modulePath, 'package.json'));
     assert.equal(packageJson.name, 'acmeLoyalty');
+    assert.equal(packageJson.index, '3100.14');
     assert.equal(packageJson.nodics.runtimeModule, true);
+    assert.equal(packageJson.nodics.loadableByNodicsModuleLoader, true);
+    assert.equal(packageJson.nodics.displayName, 'Acme Loyalty');
+    assert.deepEqual(packageJson.nodics.runtime, { router: false, publish: false, web: false });
     const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
     assert.deepEqual(descriptor.expansions.modules[0], {
         name: 'acmeLoyalty',
@@ -926,7 +985,7 @@ test('add-site creates one requested customer site from template and records top
         topology: {
             groups: {
                 frontends: [
-                    { code: 'axis', label: 'Axis', cwd: '{workspaceRoot}/nodics.axis' }
+                    { code: 'axis', label: 'Axis', cwd: '{workspaceRoot}/nodics.axis', port: 3100 }
                 ]
             }
         }
@@ -948,14 +1007,17 @@ test('add-site creates one requested customer site from template and records top
     assert.equal(result.operation, 'local-expansion-add-site');
     assert.equal(result.siteName, 'acme.electronics');
     assert.equal(result.siteType, 'commerce');
+    assert.equal(result.frontendPort, 3200);
+    assert.equal(result.install.status, 'passed');
     const sitePath = path.join(workspace, 'acme.electronics');
     assert.equal(installer.readJsonFile(path.join(sitePath, 'package.json')).name, 'acme.electronics');
     assert.match(fs.readFileSync(path.join(sitePath, 'README.md'), 'utf8'), /Acme Electronics/);
     assert.match(fs.readFileSync(path.join(sitePath, '.env'), 'utf8'), /AGORA_SOLUTION=electronics/);
     const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
-    assert(descriptor.topology.groups.frontends.some(frontend =>
-        frontend.code === 'acmeElectronicsSite' &&
-        frontend.cwd === '{workspaceRoot}/acme.electronics'));
+    const frontend = descriptor.topology.groups.frontends.find(entry => entry.code === 'acmeElectronicsSite');
+    assert.equal(frontend.cwd, '{workspaceRoot}/acme.electronics');
+    assert.equal(frontend.port, 3200);
+    assert.deepEqual(frontend.args, ['run', 'dev', '--', '--host', '127.0.0.1', '--port', '3200']);
     assert.deepEqual(descriptor.expansions.sites[0], {
         name: 'acme.electronics',
         type: 'commerce',

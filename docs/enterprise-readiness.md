@@ -166,6 +166,11 @@ support, and migration conflicts. The stable boundary is:
   modules;
 - named customer sites own customer-facing experience.
 
+The installer must not write customer `.env` files or installer identity files
+inside vendor-owned repositories. Axis receives local runtime values from the
+customer project topology at launch time, keeping the BackOffice checkout
+migration-safe.
+
 ## Expansion Governance
 
 First-machine setup is intentionally small. It creates the named customer
@@ -275,7 +280,8 @@ npx github:Nodics/nodics.installer#v0.7.0 --action=repair --yes
 ```
 
 The repair path updates installer identity, framework links, environment names,
-frontend `.env` files, and Docker Local naming without recloning.
+customer-owned frontend `.env` files, Axis topology launch environment, and
+Docker Local naming without recloning.
 
 ## Template Contract
 
