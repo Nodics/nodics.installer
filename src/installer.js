@@ -687,6 +687,7 @@ const installer = {
 
     nodeCommands: function (options) {
         const project = options.application.projectPath;
+        const runsAcceptance = options.executionLevel === 'acceptance' || options.acceptance;
         const commands = [
             { stage: 'configure', cwd: project, command: 'copy .env.example to .env when .env is absent' },
             { stage: 'configure', cwd: project, command: 'set NODICS_FRAMEWORK_ROOT=../nodics.ai in .env' },
@@ -704,7 +705,8 @@ const installer = {
                 env: { NODICS_NEXUS_MEDIA_IMPORT_ONLINE: 'false' } },
             { stage: 'initialize', cwd: project, command: 'npm run acceptance:agora-cms-media-seed', when: options.accelerator !== 'common' },
             { stage: 'initialize', cwd: project, command: 'npm run acceptance:guided-initialization', when: options.accelerator !== 'common' },
-            { stage: 'acceptance', cwd: project, command: 'npm run acceptance:local:fresh', when: options.acceptance },
+            { stage: 'acceptance', cwd: project, command: 'npm run acceptance:local', when: runsAcceptance,
+                env: { AXIS_PROJECT: options.application.projectName } },
             { stage: 'acceptance', cwd: project, command: 'npm run test:multi-domain', when: options.accelerator === 'combined' }
         ];
         return this.normalizeCommands(commands);
@@ -1766,7 +1768,9 @@ const installer = {
     runAcceptanceChecks: function (options) {
         return options.mode === 'docker' ?
             this.runProjectCommand(options, 'docker-local:acceptance', [], false) :
-            this.runProjectCommand(options, 'acceptance:local:fresh', [], false);
+            this.runProjectCommand(options, 'acceptance:local', [], false, {
+                AXIS_PROJECT: options.application.projectName
+            });
     },
 
     collectFiles: function (rootPath, matcher, maxFiles) {
@@ -2703,7 +2707,7 @@ const installer = {
             this.writeEvidence(plan.evidencePath, evidence);
             return { operation: 'local-setup-execution', ok: true, evidencePath: plan.evidencePath, evidence };
         }
-        if (options.acceptance) {
+        if (options.executionLevel === 'acceptance' || options.acceptance) {
             runStage('acceptance', 'Run acceptance checks', () => this.runAcceptanceChecks(options));
         }
         evidence.finishedAt = new Date().toISOString();

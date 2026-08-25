@@ -638,6 +638,51 @@ test('start execution rechecks live topology even when evidence has a prior star
     assert.equal(evidence.steps.filter(step => step.code === 'start').length, 2);
 });
 
+test('acceptance execution level runs acceptance checks without extra flag', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-acceptance-level-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--action=execute',
+        '--yes',
+        '--execution-level=acceptance',
+        '--application-name=Acceptance Level',
+        '--apps=axis'
+    ]);
+    let acceptanceCalls = 0;
+    const service = {
+        ...installer,
+        prepareRepositories: () => [{ repository: 'nodics.ai', action: 'reused' }],
+        rebrandGeneratedApplications: () => ['acceptance-level.startio/.nodics-installer-identity.json'],
+        assertVendorRepositoriesUnmodified: () => ({ status: 'passed' }),
+        installFrameworkDependencies: () => ({ status: 'passed', command: 'npm ci' }),
+        configureApplicationProject: () => ({ status: 'passed', command: 'npm run configure:framework' }),
+        installDependencies: () => [{ status: 'passed', command: 'npm ci' }],
+        preflight: async () => ({ operation: 'local-setup-preflight', ok: true, checks: [{ code: 'node', status: 'passed' }] }),
+        runTopologyPreflight: () => ({ status: 'passed', command: 'npm run topology:preflight' }),
+        readTopologyStatus: () => ({
+            status: {
+                supervisor: 'RUNNING',
+                runtimes: [{ code: 'platform', ready: true, ownership: 'THIS_SUPERVISOR' }]
+            }
+        }),
+        runGuidedInitialization: () => ({ status: 'passed', operation: 'guided-initialization' }),
+        runAcceptanceChecks: () => {
+            acceptanceCalls += 1;
+            return { status: 'passed', command: 'npm run acceptance:local' };
+        }
+    };
+
+    const plan = service.createSetupPlan(options);
+    assert(plan.commands.some(command => command.stage === 'acceptance' &&
+        command.command === 'npm run acceptance:local' &&
+        command.env.AXIS_PROJECT === 'acceptance-level.startio'));
+    const result = await service.executeSetup(plan, options);
+
+    assert.equal(result.ok, true);
+    assert.equal(acceptanceCalls, 1);
+    assert(result.evidence.steps.some(step => step.code === 'acceptance' && step.status === 'passed'));
+});
+
 test('start action operates on topology without running setup pipeline', async () => {
     const options = installer.parseOptions([
         '--workspace=/tmp/nodicsRoot',
