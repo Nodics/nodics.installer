@@ -700,6 +700,9 @@ const installer = {
             { stage: 'preflight', cwd: project, command: 'npm run topology:preflight' },
             { stage: 'start', cwd: project, command: 'npm run topology:start:all', when: options.apps.length > 0 || options.companySite || options.commerceSite },
             { stage: 'start', cwd: project, command: 'npm run topology:start', when: options.apps.length === 0 && !options.companySite && !options.commerceSite },
+            { stage: 'initialize', cwd: project, command: 'npm run acceptance:nexus-cms-media-seed', when: options.companySite,
+                env: { NODICS_NEXUS_MEDIA_IMPORT_ONLINE: 'false' } },
+            { stage: 'initialize', cwd: project, command: 'npm run acceptance:agora-cms-media-seed', when: options.accelerator !== 'common' },
             { stage: 'initialize', cwd: project, command: 'npm run acceptance:guided-initialization', when: options.accelerator !== 'common' },
             { stage: 'acceptance', cwd: project, command: 'npm run acceptance:local:fresh', when: options.acceptance },
             { stage: 'acceptance', cwd: project, command: 'npm run test:multi-domain', when: options.accelerator === 'combined' }
@@ -1665,10 +1668,11 @@ const installer = {
         return this.packageInstallCommand(path.join(options.workspace, 'nodics.ai'), options);
     },
 
-    runProjectCommand: function (options, script, commandArgs, allowFailure) {
+    runProjectCommand: function (options, script, commandArgs, allowFailure, env) {
         return this.runCommand('npm', ['run', script, ...(commandArgs || [])], {
             cwd: options.application.projectPath,
-            allowFailure: Boolean(allowFailure)
+            allowFailure: Boolean(allowFailure),
+            env: env ? Object.assign({}, process.env, env) : undefined
         });
     },
 
@@ -1741,7 +1745,22 @@ const installer = {
     },
 
     runGuidedInitialization: function (options) {
-        return this.runProjectCommand(options, 'acceptance:guided-initialization', [], false);
+        const commands = [];
+        if (options.companySite) {
+            commands.push(this.runProjectCommand(options, 'acceptance:nexus-cms-media-seed', [], false, {
+                NODICS_NEXUS_MEDIA_IMPORT_ONLINE: 'false'
+            }));
+        }
+        if (options.accelerator !== 'common') {
+            commands.push(this.runProjectCommand(options, 'acceptance:agora-cms-media-seed', [], false));
+            commands.push(this.runProjectCommand(options, 'acceptance:guided-initialization', [], false));
+        }
+        return {
+            status: 'passed',
+            operation: 'guided-initialization',
+            commands,
+            finishedAt: new Date().toISOString()
+        };
     },
 
     runAcceptanceChecks: function (options) {

@@ -123,6 +123,13 @@ test('creates an executable beginner local setup plan', () => {
     assert(!JSON.stringify(plan).includes('nodics.nexus'));
     assert(plan.commands.some(command => command.stage === 'preflight' && command.command === 'npm run topology:preflight'));
     assert(plan.commands.some(command => command.stage === 'start' && command.command.includes('topology:start:all')));
+    assert(plan.commands.some(command => command.stage === 'initialize' &&
+        command.command === 'npm run acceptance:nexus-cms-media-seed' &&
+        command.env.NODICS_NEXUS_MEDIA_IMPORT_ONLINE === 'false'));
+    assert(plan.commands.some(command => command.stage === 'initialize' &&
+        command.command === 'npm run acceptance:agora-cms-media-seed'));
+    assert(plan.commands.some(command => command.stage === 'initialize' &&
+        command.command === 'npm run acceptance:guided-initialization'));
     assert.equal(plan.expectedUrls.axis, 'http://localhost:3100');
     assert.equal(plan.expectedUrls.companySite, 'http://localhost:3200');
     assert.equal(plan.expectedUrls.commerceSite, 'http://localhost:3300');
