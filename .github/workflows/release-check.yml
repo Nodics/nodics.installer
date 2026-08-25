@@ -36,5 +36,7 @@ jobs:
         run: npm install
       - name: Test
         run: npm test
+      - name: Publish readiness
+        run: npm run publish:check
       - name: Pack smoke test
         run: npm pack --dry-run

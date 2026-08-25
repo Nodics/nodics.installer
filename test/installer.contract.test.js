@@ -29,6 +29,7 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
     assert.equal(packageJson.version, '0.7.0');
     assert.equal(packageJson.repository.url, 'git+https://github.com/Nodics/nodics.installer.git');
     assert.equal(packageJson.publishConfig.access, 'public');
+    assert.equal(packageJson.scripts['publish:check'], 'npm test && npm run pack:check');
     assert(packageJson.files.includes('docs/'));
     assert.equal(packageJson.nodics.kind, 'tooling');
     assert.equal(packageJson.nodics.displayName, 'Nodics Installer');
@@ -50,7 +51,10 @@ test('documentation preserves AI tool repository entry path', () => {
         'GitHub Copilot',
         'repository URL',
         'does not need',
-        'local customer workspace'
+        'local customer workspace',
+        'npx',
+        'governed bootstrap contracts',
+        'active plan'
     ];
     [
         'AGENTS.md',
@@ -436,34 +440,33 @@ test('rebrand rewrites generated topology frontend roots', () => {
         label: frontend.label,
         cwd: frontend.cwd,
         command: frontend.command,
-        args: frontend.args
+        args: frontend.args,
+        env: frontend.env
     })), [
         {
             code: 'axis',
             label: 'Axis',
             cwd: '{workspaceRoot}/nodics.axis',
-            command: 'env',
-            args: [
-                'AXIS_BACKOFFICE_BASE_URL=http://localhost:4300',
-                'AXIS_ENTERPRISE_CODE=default',
-                'AXIS_PROJECT_CODE=acme.startio',
-                'AXIS_CLIENT_CONTRACT_VERSION=0',
-                'AXIS_REQUEST_TIMEOUT_MS=10000',
-                'AXIS_BROWSER_SESSION_CSRF_COOKIE_NAME=nodics_axis_csrf',
-                'AXIS_ASSISTANT_MAXIMUM_EVENT_BYTES=65536',
-                'AXIS_ASSISTANT_RECONNECT_WINDOW_MS=120000',
-                'AXIS_ASSISTANT_IDLE_TIMEOUT_MS=45000',
-                'AXIS_DEV_HOST=0.0.0.0',
-                'AXIS_DEV_PORT=3100',
-                'AXIS_STRICT_PORT=true',
-                'AXIS_BUILD_SOURCEMAP=true',
-                'npm',
-                'run',
-                'dev'
-            ]
+            command: 'npm',
+            args: ['run', 'dev'],
+            env: {
+                AXIS_BACKOFFICE_BASE_URL: 'http://localhost:4300',
+                AXIS_ENTERPRISE_CODE: 'default',
+                AXIS_PROJECT_CODE: 'acme.startio',
+                AXIS_CLIENT_CONTRACT_VERSION: '0',
+                AXIS_REQUEST_TIMEOUT_MS: '10000',
+                AXIS_BROWSER_SESSION_CSRF_COOKIE_NAME: 'nodics_axis_csrf',
+                AXIS_ASSISTANT_MAXIMUM_EVENT_BYTES: '65536',
+                AXIS_ASSISTANT_RECONNECT_WINDOW_MS: '120000',
+                AXIS_ASSISTANT_IDLE_TIMEOUT_MS: '45000',
+                AXIS_DEV_HOST: '0.0.0.0',
+                AXIS_DEV_PORT: '3100',
+                AXIS_STRICT_PORT: 'true',
+                AXIS_BUILD_SOURCEMAP: 'true'
+            }
         },
-        { code: 'companySite', label: 'Acme Web', cwd: '{workspaceRoot}/acme.web', command: undefined, args: undefined },
-        { code: 'commerceSite', label: 'Acme Apparel', cwd: '{workspaceRoot}/acme.apparel', command: undefined, args: undefined }
+        { code: 'companySite', label: 'Acme Web', cwd: '{workspaceRoot}/acme.web', command: undefined, args: undefined, env: undefined },
+        { code: 'commerceSite', label: 'Acme Apparel', cwd: '{workspaceRoot}/acme.apparel', command: undefined, args: undefined, env: undefined }
     ]);
     const renamedServerConfigPath = path.join(projectPath, 'envs', 'acmeLocal', 'platformServer', 'config');
     assert(!fs.existsSync(path.join(projectPath, 'modules', 'kickoffCore')));
@@ -1076,5 +1079,6 @@ test('release workflow validates installer package', () => {
     const workflow = fs.readFileSync(workflowPath, 'utf8');
     assert.match(workflow, /development/);
     assert.match(workflow, /npm test/);
+    assert.match(workflow, /npm run publish:check/);
     assert.match(workflow, /npm pack --dry-run/);
 });

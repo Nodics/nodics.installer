@@ -1461,13 +1461,9 @@ const installer = {
 
     axisRuntimeCommand: function (options) {
         return {
-            command: 'env',
-            args: [
-                ...Object.entries(this.axisRuntimeEnvironment(options)).map(([key, value]) => key + '=' + value),
-                'npm',
-                'run',
-                'dev'
-            ]
+            command: 'npm',
+            args: ['run', 'dev'],
+            env: this.axisRuntimeEnvironment(options)
         };
     },
 

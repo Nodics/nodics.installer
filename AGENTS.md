@@ -29,6 +29,15 @@ When the installer is used from an AI tool, confirm the target workspace before
 mutating actions and keep generated customer-local output out of source
 repository commits unless the user explicitly asks otherwise.
 
+## npm and npx change governance
+
+`npx` and npm package identity are governed bootstrap contracts.
+Any change that affects `npx`, npm package identity, `package.json.bin`,
+`publishConfig`, release tags, publish scripts, or bootstrap commands must be
+called out to the user before implementation and reflected in the active plan.
+Do not silently change whether beginners should run
+`npx github:Nodics/nodics.installer` or `npx @nodics/installer`.
+
 For partner and customer workspaces, treat `nodics.ai` and `nodics.axis` as
 vendor-owned read-only customization boundaries. Read them, run documented
 scripts, and sync approved releases, but do not place customer customizations

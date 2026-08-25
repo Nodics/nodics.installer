@@ -40,7 +40,9 @@
   "bin": "bin/nodics-installer.js",
   "scripts": {
     "start": "node bin/nodics-installer.js",
-    "test": "node --test test/installer.contract.test.js"
+    "test": "node --test test/installer.contract.test.js",
+    "pack:check": "npm pack --dry-run",
+    "publish:check": "npm test && npm run pack:check"
   },
   "nodics": {
     "kind": "tooling",

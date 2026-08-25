@@ -40,12 +40,18 @@ npx github:Nodics/nodics.installer#v0.7.0
 The repository is named `nodics.installer`. The npm package name is
 `@nodics/installer`.
 
+`npx` and npm package identity are governed bootstrap contracts. Any change to
+the package name, `package.json.bin`, `publishConfig`, release tags, publish
+scripts, or documented bootstrap commands must be called out to the user before
+implementation and reflected in the active plan.
+
 Before publishing to npm, the release owner must confirm:
 
 - Nodics owns the `@nodics` npm scope;
 - package access is public;
 - the GitHub tag matches `package.json.version`;
 - `npm test` passes locally and in CI;
+- `npm run publish:check` passes;
 - `npm pack --dry-run` includes only expected files;
 - publish uses npm provenance where available;
 - support, security, and deprecation policy are documented.
@@ -168,8 +174,8 @@ support, and migration conflicts. The stable boundary is:
 
 The installer must not write customer `.env` files or installer identity files
 inside vendor-owned repositories. Axis receives local runtime values from the
-customer project topology at launch time, keeping the BackOffice checkout
-migration-safe.
+customer project topology `env` block at launch time, keeping the BackOffice
+checkout migration-safe.
 
 ## Expansion Governance
 

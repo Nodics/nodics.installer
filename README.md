@@ -57,7 +57,14 @@ For local development inside this repository:
 ```bash
 npm start
 npm test
+npm run publish:check
 ```
+
+Maintainers and AI tools must treat `npx` and npm package identity as governed
+bootstrap contracts. Before changing `package.json` package name, `bin`,
+`publishConfig`, release tags, publish scripts, or documented bootstrap
+commands, update the active plan and explicitly tell the user what will change
+for `npx github:Nodics/nodics.installer` or `npx @nodics/installer`.
 
 ## How `npx` Finds The Installer
 
@@ -255,8 +262,9 @@ should be reported upstream to Nodics instead of patched locally in a customer
 workspace.
 
 The installer does not write customer `.env` files or installer identity files
-inside `nodics.ai` or `nodics.axis`. Axis local runtime values are injected from
-the named customer project topology when Axis is started.
+inside `nodics.ai` or `nodics.axis`. Axis local runtime values are declared in
+the named customer project topology `env` block and injected by framework
+tooling when Axis is started.
 
 The custom project journey is intentionally still blocked. The installer reports
 that path as deferred until the reference local setup is stable enough to become
@@ -713,8 +721,8 @@ operations setup contract:
   new-site topology ports, and dependency installation;
 - framework-first dependency installation;
 - application `.env` framework and identity linking;
-- Axis launch-time environment injection from the customer topology without
-  writing customer config into `nodics.axis`;
+- Axis native topology `env` injection without writing customer config into
+  `nodics.axis`;
 - vendor-owned repository boundary verification;
 - dependency install orchestration;
 - resumable setup evidence;
