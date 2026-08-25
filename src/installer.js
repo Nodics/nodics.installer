@@ -79,20 +79,28 @@ const FRONTEND_REPOSITORIES = Object.freeze({
     }
 });
 
-const TEMPLATE_ACCEPTANCE_CAPABILITIES = Object.freeze({
+const STARTER_TEMPLATE_REGISTRY = Object.freeze({
     [DEFAULT_REPOSITORIES.applicationTemplate.name]: Object.freeze({
-        documentationPacks: Object.freeze([
-            Object.freeze({
-                code: 'kickoffDocumentation',
-                profileCode: 'kickoffdocs',
-                minimumRoutes: 4,
-                navigationComponent: 'kickoffDocumentationNavigation',
-                site: 'kickoffDocumentationSite',
-                path: '/docs/nodics-kickoff'
-            })
-        ]),
-        routes: Object.freeze(['/docs/nodics-kickoff']),
-        expectDocumentation: true
+        name: DEFAULT_REPOSITORIES.applicationTemplate.name,
+        generatedProject: Object.freeze({
+            documentationPacks: Object.freeze([]),
+            routes: Object.freeze([]),
+            expectDocumentation: false
+        }),
+        preservedIdentity: Object.freeze({
+            documentationPacks: Object.freeze([
+                Object.freeze({
+                    code: 'kickoffDocumentation',
+                    profileCode: 'kickoffdocs',
+                    minimumRoutes: 4,
+                    navigationComponent: 'kickoffDocumentationNavigation',
+                    site: 'kickoffDocumentationSite',
+                    path: '/docs/nodics-kickoff'
+                })
+            ]),
+            routes: Object.freeze(['/docs/nodics-kickoff']),
+            expectDocumentation: true
+        })
     })
 });
 
@@ -1190,6 +1198,70 @@ const installer = {
         fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n');
     },
 
+    validateLocalBootstrapCapabilities: function (capabilities) {
+        const errors = [];
+        const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
+        const requireString = (value, pathName) => {
+            if (typeof value !== 'string' || !value.trim()) {
+                errors.push(pathName + ' must be a non-empty string.');
+            }
+        };
+        if (!isObject(capabilities)) {
+            return ['acceptance.localBootstrap must be an object.'];
+        }
+        if (!Array.isArray(capabilities.documentationPacks)) {
+            errors.push('acceptance.localBootstrap.documentationPacks must be an array.');
+        } else {
+            capabilities.documentationPacks.forEach((pack, index) => {
+                const base = 'acceptance.localBootstrap.documentationPacks[' + index + ']';
+                if (!isObject(pack)) {
+                    errors.push(base + ' must be an object.');
+                    return;
+                }
+                requireString(pack.code, base + '.code');
+                requireString(pack.profileCode, base + '.profileCode');
+                requireString(pack.navigationComponent, base + '.navigationComponent');
+                requireString(pack.site, base + '.site');
+                requireString(pack.path, base + '.path');
+                if (typeof pack.path === 'string' && !pack.path.startsWith('/')) {
+                    errors.push(base + '.path must start with /.');
+                }
+                if (!Number.isInteger(pack.minimumRoutes) || pack.minimumRoutes < 0) {
+                    errors.push(base + '.minimumRoutes must be a non-negative integer.');
+                }
+            });
+        }
+        if (!Array.isArray(capabilities.contentPacks)) {
+            errors.push('acceptance.localBootstrap.contentPacks must be an array.');
+        }
+        if (!isObject(capabilities.axisSmoke)) {
+            errors.push('acceptance.localBootstrap.axisSmoke must be an object.');
+            return errors;
+        }
+        ['expectModules', 'expectDocumentation', 'cronLifecycle', 'processLifecycle'].forEach(field => {
+            if (typeof capabilities.axisSmoke[field] !== 'boolean') {
+                errors.push('acceptance.localBootstrap.axisSmoke.' + field + ' must be true or false.');
+            }
+        });
+        if (!Array.isArray(capabilities.axisSmoke.routes)) {
+            errors.push('acceptance.localBootstrap.axisSmoke.routes must be an array.');
+        } else {
+            capabilities.axisSmoke.routes.forEach((route, index) => {
+                if (typeof route !== 'string' || !route.startsWith('/')) {
+                    errors.push('acceptance.localBootstrap.axisSmoke.routes[' + index + '] must start with /.');
+                }
+            });
+        }
+        return errors;
+    },
+
+    assertValidLocalBootstrapCapabilities: function (capabilities) {
+        const errors = this.validateLocalBootstrapCapabilities(capabilities);
+        if (errors.length) {
+            throw new Error('Generated local acceptance capabilities are invalid:\n- ' + errors.join('\n- '));
+        }
+    },
+
     upsertEnvFile: function (envPath, values, examplePath) {
         if (!fs.existsSync(envPath)) {
             if (examplePath && fs.existsSync(examplePath)) {
@@ -1217,8 +1289,12 @@ const installer = {
     },
 
     recordStep: function (evidence, evidencePath, step) {
+        if (step.replaceExisting) {
+            evidence.steps = evidence.steps.filter(existing => existing.code !== step.code);
+        }
+        const { replaceExisting, ...recordedStep } = step;
         evidence.steps.push({
-            ...step,
+            ...recordedStep,
             timestamp: new Date().toISOString()
         });
         this.writeEvidence(evidencePath, evidence);
@@ -1528,6 +1604,15 @@ const installer = {
         return identityPath;
     },
 
+    starterTemplateAcceptanceCapabilities: function (options) {
+        const template = STARTER_TEMPLATE_REGISTRY[options.application.sourceTemplate];
+        if (!template) {
+            return { documentationPacks: [], routes: [], expectDocumentation: false };
+        }
+        return options.application.preservesSourceTemplateIdentity ?
+            template.preservedIdentity : template.generatedProject;
+    },
+
     localBootstrapAcceptanceCapabilities: function (options) {
         const documentationPacks = [
             {
@@ -1547,9 +1632,8 @@ const installer = {
                 path: '/docs/nodics-axis'
             }
         ];
-        const templateCapabilities = options.application.preservesSourceTemplateIdentity ?
-            TEMPLATE_ACCEPTANCE_CAPABILITIES[options.application.sourceTemplate] : null;
-        if (templateCapabilities) {
+        const templateCapabilities = this.starterTemplateAcceptanceCapabilities(options);
+        if (templateCapabilities.documentationPacks.length) {
             documentationPacks.push(...templateCapabilities.documentationPacks.map(pack => ({ ...pack })));
         }
         const smokeRoutes = [
@@ -1573,20 +1657,22 @@ const installer = {
             '/docs/framework/process/visual-designer',
             '/docs/swaggers'
         ];
-        if (templateCapabilities) {
+        if (templateCapabilities.routes.length) {
             smokeRoutes.splice(4, 0, ...templateCapabilities.routes);
         }
-        return {
+        const capabilities = {
             documentationPacks,
             contentPacks: [],
             axisSmoke: {
                 expectModules: true,
-                expectDocumentation: Boolean(templateCapabilities && templateCapabilities.expectDocumentation),
+                expectDocumentation: Boolean(templateCapabilities.expectDocumentation),
                 cronLifecycle: true,
                 processLifecycle: true,
                 routes: smokeRoutes
             }
         };
+        this.assertValidLocalBootstrapCapabilities(capabilities);
+        return capabilities;
     },
 
     updateProjectTopologyIdentity: function (projectPath, options) {
@@ -2786,7 +2872,8 @@ const installer = {
                 label: 'Start topology',
                 stageVersion: START_STAGE_VERSION,
                 status: 'passed',
-                result: startResult
+                result: startResult,
+                replaceExisting: true
             });
         }
         if (options.executionLevel === 'start') {

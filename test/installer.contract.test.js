@@ -517,6 +517,8 @@ test('local bootstrap acceptance capabilities are project-declared', () => {
     const acmeCapabilities = installer.localBootstrapAcceptanceCapabilities(acme);
     const kickoffCapabilities = installer.localBootstrapAcceptanceCapabilities(kickoff);
 
+    assert.equal(installer.starterTemplateAcceptanceCapabilities(acme).expectDocumentation, false);
+    assert.equal(installer.starterTemplateAcceptanceCapabilities(kickoff).expectDocumentation, true);
     assert.deepEqual(acmeCapabilities.documentationPacks.map(pack => pack.code), [
         'nodicsDocumentation',
         'axisDocumentation'
@@ -530,6 +532,39 @@ test('local bootstrap acceptance capabilities are project-declared', () => {
         !installerSource.includes(["options.application.projectName", " === 'nodics.kickoff'"].join('')),
         'local acceptance capabilities must come from starter metadata, not a hard-coded output project name'
     );
+    assert(
+        installerSource.includes('STARTER_TEMPLATE_REGISTRY') &&
+            installerSource.includes('generatedProject') &&
+            installerSource.includes('preservedIdentity'),
+        'starter templates must declare generated-project and preserved-identity capabilities separately'
+    );
+});
+
+test('local bootstrap capability validation gives beginner-readable errors', () => {
+    const errors = installer.validateLocalBootstrapCapabilities({
+        documentationPacks: [{
+            code: '',
+            profileCode: 'docs',
+            minimumRoutes: -1,
+            navigationComponent: 'nav',
+            site: 'site',
+            path: 'docs'
+        }],
+        contentPacks: {},
+        axisSmoke: {
+            expectModules: 'yes',
+            expectDocumentation: false,
+            cronLifecycle: true,
+            processLifecycle: true,
+            routes: ['docs']
+        }
+    });
+    assert(errors.includes('acceptance.localBootstrap.documentationPacks[0].code must be a non-empty string.'));
+    assert(errors.includes('acceptance.localBootstrap.documentationPacks[0].path must start with /.'));
+    assert(errors.includes('acceptance.localBootstrap.documentationPacks[0].minimumRoutes must be a non-negative integer.'));
+    assert(errors.includes('acceptance.localBootstrap.contentPacks must be an array.'));
+    assert(errors.includes('acceptance.localBootstrap.axisSmoke.expectModules must be true or false.'));
+    assert(errors.includes('acceptance.localBootstrap.axisSmoke.routes[0] must start with /.'));
 });
 
 test('docker mode first run keeps only the Docker Local environment', () => {
@@ -672,7 +707,10 @@ test('start execution rechecks live topology even when evidence has a prior star
 
     assert.equal(startCalls, 1);
     const evidence = JSON.parse(fs.readFileSync(plan.evidencePath, 'utf8'));
-    assert.equal(evidence.steps.filter(step => step.code === 'start').length, 2);
+    const startSteps = evidence.steps.filter(step => step.code === 'start');
+    assert.equal(startSteps.length, 1);
+    assert.equal(startSteps[0].stageVersion, '0.7.0:detached-topology-start-v1');
+    assert.equal(startSteps[0].result.status, 'passed');
 });
 
 test('acceptance execution level runs acceptance checks without extra flag', async () => {
