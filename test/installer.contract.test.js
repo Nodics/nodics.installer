@@ -88,6 +88,9 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.installer.packageName, '@nodics/installer');
     assert.equal(plan.installer.version, '0.7.0');
     assert.equal(plan.installer.bootstrapCommand, 'npx github:Nodics/nodics.installer');
+    assert.equal(plan.beginnerChoices.environmentProfile.code, 'local-dev');
+    assert.equal(plan.beginnerChoices.acceptanceProfile.code, 'standard');
+    assert.equal(plan.beginnerChoices.releaseChannel, 'development');
     assert.equal(plan.beginnerChoices.application.name, 'Acme');
     assert.equal(plan.beginnerChoices.application.code, 'acme');
     assert.equal(plan.beginnerChoices.application.projectPath, '/tmp/nodicsRoot/acme.startio');
@@ -108,6 +111,18 @@ test('creates an executable beginner local setup plan', () => {
     assert.deepEqual(plan.vendorRepositoryPolicy.repositories, ['nodics.ai', 'nodics.axis']);
     assert.match(plan.vendorRepositoryPolicy.reason, /upgrades and migrations/);
     assert(plan.safetyRules.some(rule => rule.includes('nodics.ai') && rule.includes('nodics.axis')));
+    assert.equal(plan.supportMatrix.node.recommended, '22.x or 24.x');
+    assert.equal(plan.jsonContracts.preflight, 1);
+    assert(plan.serviceDependencyGraph.some(entry => entry.service === 'axis' && entry.dependsOn.includes('platform')));
+    assert(plan.portPlan.some(entry => entry.code === 'platform' && entry.port === 4300));
+    assert(plan.runtimeHealthPlan.some(entry => entry.code === 'axis'));
+    assert.equal(plan.databaseLifecyclePolicy.destructiveReset, false);
+    assert.equal(plan.installStrategy.lockfileCommand, 'npm ci');
+    assert.equal(plan.enterprisePolicy.telemetry, 'Installer evidence records local timings and failure categories only; it does not send telemetry.');
+    assert.equal(plan.recovery.cleanupAction, 'cleanup-workspace');
+    assert.equal(plan.generatedFilePolicy.vendorOwned[0], 'nodics.ai');
+    assert.equal(plan.customerCustomizationMap.backendModules, 'acme.startio/modules');
+    assert(plan.beginnerNextSteps.some(step => step.includes('Do not change nodics.ai or nodics.axis')));
     assert.deepEqual(plan.accelerator.domains, ['common', 'apparel']);
     assert(plan.repositories.some(repository => repository.name === 'nodics.ai'));
     assert(plan.repositories.some(repository => repository.name === 'acme.startio'));
@@ -134,6 +149,31 @@ test('creates an executable beginner local setup plan', () => {
     assert.equal(plan.expectedUrls.companySite, 'http://localhost:3200');
     assert.equal(plan.expectedUrls.commerceSite, 'http://localhost:3300');
     assert.equal(plan.evidencePath, '/tmp/nodicsRoot/.nodics-installer/setup-evidence.json');
+});
+
+test('enterprise options support acceptance profiles environment profiles and release channels', () => {
+    const stable = installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--release-channel=stable',
+        '--acceptance-profile=full',
+        '--environment-profile=local-qa',
+        '--fresh-data',
+        '--alternate-ports'
+    ]);
+    const explicit = installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--release-channel=stable',
+        '--release=release-2026.08'
+    ]);
+    const plan = installer.createSetupPlan(stable);
+    assert.equal(stable.release, 'master');
+    assert.equal(explicit.release, 'release-2026.08');
+    assert.equal(plan.beginnerChoices.acceptanceProfile.code, 'full');
+    assert.equal(plan.beginnerChoices.environmentProfile.code, 'local-qa');
+    assert.equal(plan.databaseLifecyclePolicy.destructiveReset, true);
+    assert(plan.portPlan.every(entry => entry.alternatePort === entry.port + 100));
 });
 
 test('defaults backend project code to a specific application identity', () => {
@@ -567,6 +607,30 @@ test('local bootstrap capability validation gives beginner-readable errors', () 
     assert(errors.includes('acceptance.localBootstrap.axisSmoke.routes[0] must start with /.'));
 });
 
+test('starter template descriptor can override built-in capabilities', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-template-descriptor-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio'
+    ]);
+    fs.mkdirSync(options.application.projectPath, { recursive: true });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.installer.json'), {
+        acceptance: {
+            generatedProject: {
+                documentationPacks: [],
+                routes: ['/docs/customer-template'],
+                expectDocumentation: false
+            }
+        }
+    });
+
+    const capabilities = installer.localBootstrapAcceptanceCapabilities(options);
+
+    assert(capabilities.axisSmoke.routes.includes('/docs/customer-template'));
+    assert(!capabilities.axisSmoke.routes.includes('/docs/nodics-kickoff'));
+});
+
 test('docker mode first run keeps only the Docker Local environment', () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-docker-env-'));
     const projectPath = path.join(workspace, 'acme.startio');
@@ -713,6 +777,27 @@ test('start execution rechecks live topology even when evidence has a prior star
     assert.equal(startSteps[0].result.status, 'passed');
 });
 
+test('from-step and retry-failed prune resumable evidence before execution', () => {
+    const evidence = {
+        steps: [
+            { code: 'download', status: 'passed' },
+            { code: 'install', status: 'passed' },
+            { code: 'start', status: 'failed' },
+            { code: 'acceptance', status: 'failed' }
+        ]
+    };
+    const options = installer.parseOptions([
+        '--workspace=/tmp/nodicsRoot',
+        '--application-name=Acme',
+        '--from-step=install',
+        '--retry-failed'
+    ]);
+
+    const prepared = installer.prepareEvidenceForResume(evidence, options);
+
+    assert.deepEqual(prepared.steps.map(step => step.code), ['download']);
+});
+
 test('acceptance execution level runs acceptance checks without extra flag', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-acceptance-level-'));
     const options = installer.parseOptions([
@@ -814,10 +899,29 @@ test('version action exposes supported actions without requiring workspace valid
     assert(result.actions.includes('add-environment'));
     assert(result.actions.includes('add-module'));
     assert(result.actions.includes('add-site'));
+    assert(result.actions.includes('inventory'));
+    assert(result.actions.includes('support-bundle'));
+    assert(result.actions.includes('upgrade-check'));
+    assert(result.actions.includes('self-check'));
+    assert(result.actions.includes('cleanup-workspace'));
+    assert(result.actions.includes('uninstall'));
     assert(result.actions.includes('troubleshooting'));
     assert(result.mutatingActions.includes('clean'));
+    assert(result.mutatingActions.includes('support-bundle'));
+    assert(result.mutatingActions.includes('cleanup-workspace'));
     assert(result.mutatingActions.includes('add-site'));
     assert.match(installer.renderVersion(result), /Mutating actions require --yes/);
+});
+
+test('self-check reports package readiness without changing npm identity', () => {
+    const options = installer.parseOptions(['--workspace=/tmp/nodicsRoot', '--action=self-check']);
+    const plan = installer.createSetupPlan(options);
+    const result = installer.selfCheck(plan, options);
+    assert.equal(result.operation, 'local-installer-self-check');
+    assert.equal(result.npmNpxReview.status, 'review-only');
+    assert.match(result.npmNpxReview.rule, /Do not change package identity/);
+    assert(result.files.every(file => file.status === 'passed'));
+    assert.match(installer.renderSelfCheck(result), /npm\/npx review: review-only/);
 });
 
 test('troubleshooting action exposes beginner failure catalog', async () => {
@@ -938,6 +1042,13 @@ test('logs action reads topology log excerpts by runtime', () => {
     assert.match(result.logs[0].excerpt, /two\nthree/);
 });
 
+test('logs action groups beginner failure signals', () => {
+    const signals = installer.logSignals('Error: listen EADDRINUSE: address already in use\nECONNREFUSED\n');
+    assert(signals.some(signal => signal.code === 'port-conflict'));
+    assert(signals.some(signal => signal.code === 'dependency-not-listening'));
+    assert(signals.some(signal => signal.code === 'runtime-error'));
+});
+
 test('clean removes generated runtime directories only when topology is stopped', () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-clean-'));
     const options = installer.parseOptions([
@@ -996,6 +1107,59 @@ test('clean refuses while topology is ready', () => {
         })
     };
     assert.throws(() => service.cleanGeneratedRuntime(options), /Refusing to clean/);
+});
+
+test('inventory upgrade-check support-bundle and cleanup use generated metadata safely', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-enterprise-actions-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--company-site-name=acme.web',
+        '--commerce-site-name=acme.apparel',
+        '--action=cleanup-workspace',
+        '--yes'
+    ]);
+    const plan = installer.createSetupPlan(options);
+    fs.mkdirSync(options.application.projectPath, { recursive: true });
+    fs.mkdirSync(options.application.companySitePath, { recursive: true });
+    fs.mkdirSync(options.application.commerceSitePath, { recursive: true });
+    fs.mkdirSync(options.application.axisPath, { recursive: true });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
+        projectCode: 'acme.startio',
+        topology: { environment: 'acmeLocal', stateDirectory: 'envs/acmeLocal/generated/local-topology' },
+        acceptance: { localBootstrap: installer.localBootstrapAcceptanceCapabilities(options) }
+    });
+    installer.writeJsonFile(path.join(options.application.projectPath, '.nodics-installer-lock.json'),
+        installer.installerLock(plan, options));
+    installer.writeJsonFile(path.join(options.application.projectPath, '.nodics-installer-identity.json'), { kind: 'customer-project' });
+    installer.writeJsonFile(path.join(options.application.companySitePath, '.nodics-installer-identity.json'), { kind: 'company-site' });
+    installer.writeJsonFile(path.join(options.application.commerceSitePath, '.nodics-installer-identity.json'), { kind: 'commerce-site' });
+    installer.writeEvidence(plan.evidencePath, installer.createEvidence(plan, options));
+
+    const service = {
+        ...installer,
+        readTopologyStatus: () => ({ status: { supervisor: 'NOT_RUNNING', runtimes: [] } }),
+        collectLogFiles: () => []
+    };
+    const inventory = service.workspaceInventory(options);
+    const upgrade = service.upgradeCheck(plan, options);
+    const support = service.supportBundle(plan, options);
+    assert(fs.existsSync(path.join(support.bundleRoot, 'support.json')));
+    assert.doesNotMatch(fs.readFileSync(path.join(support.bundleRoot, 'support.json'), 'utf8'),
+        new RegExp(installer.escapeRegExp(os.homedir())));
+    const cleanup = service.cleanupWorkspace(plan, options);
+
+    assert.equal(inventory.operation, 'local-workspace-inventory');
+    assert(inventory.items.some(item => item.name === 'acme.startio' && item.projectCode === 'acme.startio'));
+    assert(inventory.items.some(item => item.name === 'acme.startio' && item.generated === true));
+    assert.equal(upgrade.operation, 'local-upgrade-check');
+    assert.equal(upgrade.findings.length, 0);
+    assert.equal(support.operation, 'local-support-bundle');
+    assert(cleanup.removed.includes(options.application.projectPath));
+    assert(cleanup.protectedRoots.includes('nodics.axis'));
+    assert(fs.existsSync(options.application.axisPath));
+    assert(!fs.existsSync(options.application.projectPath));
 });
 
 test('expansion allows generated customer changes but rejects vendor repository changes', () => {
@@ -1093,7 +1257,8 @@ test('add-module creates a module-shaped customer backend module', () => {
     const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
     assert.deepEqual(descriptor.expansions.modules[0], {
         name: 'acmeLoyalty',
-        kind: 'customer-module'
+        kind: 'customer-module',
+        preset: 'capability'
     });
 });
 

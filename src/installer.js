@@ -29,16 +29,45 @@ const VALID_ACCELERATORS = new Set(['common', 'apparel', 'electronics', 'telco',
 const VALID_ACTIONS = new Set([
     'plan', 'questionnaire', 'preflight', 'doctor', 'execute', 'status', 'start', 'stop', 'restart', 'logs',
     'initialize', 'acceptance', 'repair', 'clean', 'add-environment', 'add-module', 'add-site',
-    'troubleshooting', 'version'
+    'inventory', 'support-bundle', 'upgrade-check', 'self-check', 'cleanup-workspace',
+    'uninstall', 'troubleshooting', 'version'
 ]);
 const MUTATING_ACTIONS = new Set([
     'execute', 'start', 'stop', 'restart', 'initialize', 'acceptance', 'repair', 'clean',
-    'add-environment', 'add-module', 'add-site'
+    'add-environment', 'add-module', 'add-site', 'support-bundle', 'cleanup-workspace', 'uninstall'
 ]);
 const VALID_EXECUTION_LEVELS = new Set(['download', 'install', 'preflight', 'start', 'initialize', 'acceptance']);
 const VALID_CLONE_MODES = new Set(['https', 'ssh', 'existing']);
 const VALID_SITE_TYPES = new Set(['company', 'commerce']);
+const VALID_ACCEPTANCE_PROFILES = new Set(['smoke', 'standard', 'full']);
+const VALID_ENVIRONMENT_PROFILES = new Set(['local-dev', 'local-demo', 'local-qa', 'docker-local']);
+const VALID_RELEASE_CHANNELS = new Set(['development', 'stable', 'explicit']);
+const VALID_MODULE_PRESETS = new Set(['capability', 'data-pack', 'integration-adapter', 'api-facade', 'workflow-extension']);
 const VENDOR_OWNED_REPOSITORIES = Object.freeze(['nodics.ai', 'nodics.axis']);
+
+const SUPPORT_MATRIX = Object.freeze({
+    node: Object.freeze({ minimumMajor: 22, maximumMajor: 24, recommended: '22.x or 24.x' }),
+    npm: Object.freeze({ minimumMajor: 10, maximumMajor: 11, recommended: '10.x or 11.x' }),
+    git: Object.freeze({ recommended: '2.40+' }),
+    mongodb: Object.freeze({ recommended: '7.x or 8.x' }),
+    redis: Object.freeze({ recommended: '7.x' }),
+    elasticsearch: Object.freeze({ recommended: '8.x compatible HTTP endpoint' }),
+    docker: Object.freeze({ recommended: 'Docker Desktop 4.x when --mode=docker is used' }),
+    hardware: Object.freeze({ minimumMemoryGb: 8, recommendedMemoryGb: 16, minimumDiskGb: 10 })
+});
+
+const JSON_RESULT_CONTRACTS = Object.freeze({
+    plan: 1,
+    preflight: 1,
+    execute: 1,
+    status: 1,
+    logs: 1,
+    doctor: 1,
+    inventory: 1,
+    supportBundle: 1,
+    upgradeCheck: 1,
+    selfCheck: 1
+});
 
 const DEFAULT_REPOSITORIES = Object.freeze({
     framework: {
@@ -326,6 +355,14 @@ const installer = {
             '  --action=acceptance --yes Run local acceptance checks.',
             '  --action=repair --yes     Reapply installer identity and framework links.',
             '  --action=clean --yes      Remove generated runtime files only.',
+            '  --action=cleanup-workspace --yes',
+            '                             Remove only installer-created generated workspace roots.',
+            '  --action=uninstall --yes   Stop topology and remove installer-created roots.',
+            '  --action=inventory        List Nodics projects/sites/environments in a workspace.',
+            '  --action=support-bundle --yes',
+            '                             Export sanitized setup evidence and log excerpts.',
+            '  --action=upgrade-check    Compare generated metadata with current installer rules.',
+            '  --action=self-check       Validate installer package and local command readiness.',
             '  --action=add-environment --yes',
             '                             Add one explicit environment after first setup.',
             '  --action=add-module --yes Add one customer backend module after first setup.',
@@ -352,6 +389,16 @@ const installer = {
             '  --sample-data                     Include starter sample data guidance.',
             '  --fresh-data                      Prefer clean initialization data where supported.',
             '  --acceptance                      Run local acceptance commands at acceptance level.',
+            '  --acceptance-profile=smoke|standard|full',
+            '                                     Default: standard.',
+            '  --environment-profile=local-dev|local-demo|local-qa|docker-local',
+            '                                     Default follows --mode.',
+            '  --release-channel=development|stable|explicit',
+            '                                     Default: development.',
+            '  --resume --retry-failed --from-step=start',
+            '                                     Resume controls for failed setup evidence.',
+            '  --alternate-ports                  Preview alternate local port guidance.',
+            '  --support-bundle=/path/bundle      Custom sanitized support bundle path.',
             '  --proxy=http://host:port          Record enterprise proxy requirement.',
             '  --npm-registry=https://registry   Use npm registry while installing.',
             '  --offline-cache=/path             Record offline cache location.',
@@ -361,6 +408,8 @@ const installer = {
             '  --environment-name=acmeQa         Target environment for add-environment.',
             '  --from-environment=acmeLocal      Source environment to copy. Default: first local environment.',
             '  --module-name=acmeLoyalty         Target backend module for add-module.',
+            '  --module-preset=capability|data-pack|integration-adapter|api-facade|workflow-extension',
+            '                                     Default: capability.',
             '  --site-name=acme.electronics      Target site for add-site.',
             '  --site-type=commerce|company      Site template type for add-site. Default: commerce.',
             '  --json                            Print structured JSON.',
@@ -383,14 +432,19 @@ const installer = {
         const rawEnvironmentName = this.readOption(args, '--environment-name', '');
         const rawFromEnvironment = this.readOption(args, '--from-environment', '');
         const rawModuleName = this.readOption(args, '--module-name', '');
+        const modulePreset = this.readOption(args, '--module-preset', 'capability').toLowerCase();
         const rawSiteName = this.readOption(args, '--site-name', '');
         const accelerator = this.readOption(args, '--accelerator', 'common').toLowerCase();
+        const rawMode = this.readOption(args, '--mode', 'node').toLowerCase();
+        const defaultEnvironmentProfile = rawMode === 'docker' ? 'docker-local' : 'local-dev';
         const explicitApps = this.readOption(args, '--apps', null);
         const defaultApps = explicitApps === null ? ['axis'] : [];
         const requestedApps = this.readCsvOption(args, '--apps', defaultApps);
         const requiredApps = ACCELERATOR_PROFILES[accelerator] ? ACCELERATOR_PROFILES[accelerator].requiredApps : [];
         const apps = Array.from(new Set([...requestedApps, ...requiredApps]));
         const action = this.readOption(args, '--action', 'plan').toLowerCase();
+        const releaseChannel = this.readOption(args, '--release-channel', 'development').toLowerCase();
+        const explicitRelease = this.readOption(args, '--release', null);
         const explicitExecutionLevel = this.readOption(args, '--execution-level', null);
         let executionLevel = explicitExecutionLevel || 'preflight';
         if (!explicitExecutionLevel && action === 'start') {
@@ -418,7 +472,7 @@ const installer = {
             projectName,
             commerceSiteName,
             companySiteName,
-            mode: this.readOption(args, '--mode', 'node').toLowerCase(),
+            mode: rawMode,
             apps,
             commerceSite: !this.hasFlag(args, '--without-commerce-site') && !this.hasFlag(args, '--without-web'),
             companySite: !this.hasFlag(args, '--without-company-site'),
@@ -426,9 +480,17 @@ const installer = {
             action,
             executionLevel: executionLevel.toLowerCase(),
             cloneMode: this.readOption(args, '--clone', 'https').toLowerCase(),
-            release: this.readOption(args, '--release', 'development'),
+            release: explicitRelease || (releaseChannel === 'stable' ? 'master' : 'development'),
             sampleData: this.hasFlag(args, '--sample-data'),
             freshData: this.hasFlag(args, '--fresh-data'),
+            acceptanceProfile: this.readOption(args, '--acceptance-profile', 'standard').toLowerCase(),
+            environmentProfile: this.readOption(args, '--environment-profile', defaultEnvironmentProfile).toLowerCase(),
+            releaseChannel,
+            resume: this.hasFlag(args, '--resume'),
+            retryFailed: this.hasFlag(args, '--retry-failed'),
+            fromStep: this.readOption(args, '--from-step', ''),
+            alternatePorts: this.hasFlag(args, '--alternate-ports'),
+            supportBundlePath: this.readOption(args, '--support-bundle', ''),
             start: this.hasFlag(args, '--start') || action === 'start',
             initialize: this.hasFlag(args, '--initialize') || action === 'initialize',
             acceptance: this.hasFlag(args, '--acceptance') || action === 'acceptance',
@@ -447,6 +509,7 @@ const installer = {
             environmentName: this.toNodicsIdentifier(rawEnvironmentName),
             fromEnvironment: this.toNodicsIdentifier(rawFromEnvironment),
             moduleName: this.toNodicsIdentifier(rawModuleName),
+            modulePreset,
             siteName: rawSiteName ? this.toApplicationSlug(rawSiteName) : '',
             siteType: this.readOption(args, '--site-type', 'commerce').toLowerCase()
         };
@@ -605,13 +668,28 @@ const installer = {
             errors.push('Unknown accelerator `' + options.accelerator + '`. Use common, apparel, electronics, telco, or combined.');
         }
         if (!VALID_ACTIONS.has(options.action)) {
-            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, add-environment, add-module, add-site, troubleshooting, or version.');
+            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, cleanup-workspace, uninstall, inventory, support-bundle, upgrade-check, self-check, add-environment, add-module, add-site, troubleshooting, or version.');
         }
         if (!VALID_EXECUTION_LEVELS.has(options.executionLevel)) {
             errors.push('Unknown execution level `' + options.executionLevel + '`.');
         }
         if (!VALID_CLONE_MODES.has(options.cloneMode)) {
             errors.push('Unknown clone mode `' + options.cloneMode + '`. Use https, ssh, or existing.');
+        }
+        if (!VALID_ACCEPTANCE_PROFILES.has(options.acceptanceProfile)) {
+            errors.push('Unknown acceptance profile `' + options.acceptanceProfile + '`. Use smoke, standard, or full.');
+        }
+        if (!VALID_ENVIRONMENT_PROFILES.has(options.environmentProfile)) {
+            errors.push('Unknown environment profile `' + options.environmentProfile + '`. Use local-dev, local-demo, local-qa, or docker-local.');
+        }
+        if (!VALID_RELEASE_CHANNELS.has(options.releaseChannel)) {
+            errors.push('Unknown release channel `' + options.releaseChannel + '`. Use development, stable, or explicit.');
+        }
+        if (options.releaseChannel === 'explicit' && !options.release) {
+            errors.push('Explicit release channel requires --release=<branch-or-tag>.');
+        }
+        if (options.fromStep && !['download', 'rebrand', 'vendor-boundary', 'install-framework', 'configure', 'install', 'preflight', 'topology-preflight', 'start', 'initialize', 'acceptance'].includes(options.fromStep)) {
+            errors.push('Unknown --from-step `' + options.fromStep + '`. Use a setup evidence step code.');
         }
         if (MUTATING_ACTIONS.has(options.action) && !options.yes) {
             errors.push('Action `' + options.action + '` requires --yes so the installer cannot mutate the machine by accident.');
@@ -625,6 +703,9 @@ const installer = {
         }
         if (options.action === 'add-module' && !validIdentifier.test(options.moduleName)) {
             errors.push('add-module requires --module-name, for example --module-name=acmeLoyalty.');
+        }
+        if (options.action === 'add-module' && !VALID_MODULE_PRESETS.has(options.modulePreset)) {
+            errors.push('add-module requires --module-preset=capability, data-pack, integration-adapter, api-facade, or workflow-extension.');
         }
         if (options.action === 'add-module' && this.isVendorOwnedName(options.rawModuleName)) {
             errors.push('add-module cannot target vendor-owned repositories such as nodics.ai or nodics.axis.');
@@ -644,6 +725,151 @@ const installer = {
             errors.push('Workspace must be a dedicated folder, not the filesystem root or home directory.');
         }
         return { valid: errors.length === 0, errors };
+    },
+
+    environmentProfile: function (options) {
+        const profiles = {
+            'local-dev': {
+                code: 'local-dev',
+                intent: 'Developer workstation with direct Node.js processes.',
+                retainedData: true,
+                destructiveReset: false
+            },
+            'local-demo': {
+                code: 'local-demo',
+                intent: 'Repeatable local demo with sample accelerator data.',
+                retainedData: true,
+                destructiveReset: false
+            },
+            'local-qa': {
+                code: 'local-qa',
+                intent: 'Local QA validation with stronger acceptance gates.',
+                retainedData: false,
+                destructiveReset: Boolean(options.freshData)
+            },
+            'docker-local': {
+                code: 'docker-local',
+                intent: 'Container-only topology after installer bootstrap.',
+                retainedData: true,
+                destructiveReset: false
+            }
+        };
+        return profiles[options.environmentProfile] || profiles['local-dev'];
+    },
+
+    acceptanceProfile: function (options) {
+        const profiles = {
+            smoke: {
+                code: 'smoke',
+                description: 'Fast route and bootstrap checks for a beginner first look.',
+                gates: ['topology', 'public bootstrap', 'selected frontend routes']
+            },
+            standard: {
+                code: 'standard',
+                description: 'Default local acceptance with APIs, Axis smoke, process, media, and publishing readiness checks.',
+                gates: ['topology', 'security', 'publishing readiness', 'media readiness', 'Axis smoke', 'process lifecycle']
+            },
+            full: {
+                code: 'full',
+                description: 'Extended local acceptance intended for enterprise qualification before handoff.',
+                gates: ['standard gates', 'multi-domain checks', 'upgrade readiness', 'support bundle readiness']
+            }
+        };
+        return profiles[options.acceptanceProfile] || profiles.standard;
+    },
+
+    portPlan: function (options) {
+        return Object.entries(this.expectedUrls(options))
+            .filter(([, value]) => value)
+            .map(([code, url]) => ({
+                code,
+                url,
+                port: Number(new URL(url).port),
+                alternatePort: options.alternatePorts ? Number(new URL(url).port) + 100 : undefined
+            }));
+    },
+
+    serviceDependencyGraph: function (options) {
+        const graph = [
+            { service: 'platform', dependsOn: [], reason: 'Owns common runtime APIs, module registry, and secured router metadata.' },
+            { service: 'wcmsStaged', dependsOn: ['platform', 'mongodb', 'redis'], reason: 'Imports and validates staged WCMS/content data.' },
+            { service: 'wcmsOnline', dependsOn: ['platform', 'mongodb', 'redis'], reason: 'Serves active online WCMS/content projections.' },
+            { service: 'process', dependsOn: ['platform', 'mongodb', 'redis'], reason: 'Runs workflows, triggers, tasks, and cron handoff.' },
+            { service: 'engagement', dependsOn: ['platform'], reason: 'Provides communication and engagement runtime APIs when enabled.' },
+            { service: 'commerce', dependsOn: ['platform', 'mongodb', 'redis'], reason: 'Serves selected commerce accelerator APIs.' }
+        ];
+        if (options.apps.includes('axis')) {
+            graph.push({ service: 'axis', dependsOn: ['platform', 'wcmsStaged', 'process'], reason: 'BackOffice UI consumes backend-published runtime capabilities.' });
+        }
+        if (options.companySite) {
+            graph.push({ service: 'companySite', dependsOn: ['wcmsOnline'], reason: 'Company site renders online CMS content.' });
+        }
+        if (options.commerceSite) {
+            graph.push({ service: 'commerceSite', dependsOn: ['commerce', 'wcmsOnline'], reason: 'Commerce site renders selected accelerator storefront data.' });
+        }
+        return graph;
+    },
+
+    customerCustomizationMap: function (options) {
+        return {
+            backendModules: path.join(options.application.projectName, 'modules'),
+            environments: path.join(options.application.projectName, 'envs'),
+            companySite: options.companySite ? options.application.companySiteName : undefined,
+            commerceSite: options.commerceSite ? options.application.commerceSiteName : undefined,
+            protectedVendorRoots: VENDOR_OWNED_REPOSITORIES
+        };
+    },
+
+    dataSeedReadiness: function (options) {
+        const manifestPath = path.join(options.application.projectPath, 'data', 'manifest.json');
+        const moduleManifestCount = fs.existsSync(path.join(options.application.projectPath, 'modules')) ?
+            this.collectFiles(path.join(options.application.projectPath, 'modules'),
+                filePath => path.basename(filePath) === 'manifest.json' && filePath.includes(path.sep + 'data' + path.sep), 50).length : 0;
+        return {
+            status: fs.existsSync(manifestPath) || moduleManifestCount > 0 ? 'passed' : 'warning',
+            rootManifest: fs.existsSync(manifestPath) ? manifestPath : undefined,
+            moduleManifestCount,
+            fix: fs.existsSync(manifestPath) || moduleManifestCount > 0 ? undefined :
+                'Confirm starter data manifests before initialization, especially for selected accelerator data packs.'
+        };
+    },
+
+    publishingReadiness: function (options) {
+        return {
+            status: 'planned',
+            checks: [
+                'mandatory approval workflow',
+                'content catalogs',
+                'media providers',
+                'staged and online runtimes',
+                'cross-enterprise rejection gates'
+            ],
+            command: options.mode === 'docker' ? 'npm run docker-local:acceptance' : 'npm run acceptance:local'
+        };
+    },
+
+    mediaAssetReadiness: function (options) {
+        const mediaRoots = [
+            path.join(options.application.projectPath, 'data'),
+            path.join(options.application.projectPath, 'modules')
+        ];
+        const mediaReferences = mediaRoots
+            .filter(root => fs.existsSync(root))
+            .flatMap(root => this.collectFiles(root, filePath => /media|asset/i.test(filePath), 50));
+        return {
+            status: mediaReferences.length ? 'passed' : 'warning',
+            references: mediaReferences.map(filePath => path.relative(options.application.projectPath, filePath)),
+            fix: mediaReferences.length ? undefined :
+                'Verify selected accelerator media assets before publishing or storefront validation.'
+        };
+    },
+
+    runtimeHealthPlan: function (plan) {
+        return plan.portPlan.map(entry => ({
+            code: entry.code,
+            url: entry.url,
+            expected: 'HTTP reachable after start'
+        }));
     },
 
     resolveRepositoryUrl: function (repository, options) {
@@ -846,6 +1072,8 @@ const installer = {
         }
         const profile = ACCELERATOR_PROFILES[options.accelerator];
         const repositories = this.selectedRepositories(options);
+        const acceptanceProfile = this.acceptanceProfile(options);
+        const environmentProfile = this.environmentProfile(options);
         return {
             contractVersion: 1,
             operation: options.action === 'execute' ? 'local-setup-execution' : 'local-setup-plan',
@@ -866,7 +1094,10 @@ const installer = {
                 companySite: options.companySite,
                 commerceSite: options.commerceSite,
                 accelerator: options.accelerator,
+                environmentProfile,
+                acceptanceProfile,
                 release: options.release,
+                releaseChannel: options.releaseChannel,
                 cloneMode: options.cloneMode
             },
             enterpriseOptions: {
@@ -877,6 +1108,54 @@ const installer = {
                 evidenceRequired: true,
                 secretsPrinted: false
             },
+            supportMatrix: SUPPORT_MATRIX,
+            jsonContracts: JSON_RESULT_CONTRACTS,
+            serviceDependencyGraph: this.serviceDependencyGraph(options),
+            portPlan: this.portPlan(options),
+            runtimeHealthPlan: this.runtimeHealthPlan({ portPlan: this.portPlan(options) }),
+            databaseLifecyclePolicy: {
+                retainedData: environmentProfile.retainedData,
+                freshDataRequested: options.freshData,
+                destructiveReset: environmentProfile.destructiveReset,
+                rule: 'Retained-data acceptance verifies existing data through public APIs; destructive reset is only allowed through explicit fresh-data flows.'
+            },
+            installStrategy: {
+                lockfilePreferred: true,
+                lockfileCommand: 'npm ci',
+                fallbackCommand: 'npm install',
+                rule: 'Use npm ci when package-lock.json exists; otherwise use npm install and record the command in evidence.'
+            },
+            enterprisePolicy: {
+                offlineCache: options.offlineCache || undefined,
+                proxy: options.proxy || undefined,
+                npmRegistry: options.npmRegistry || undefined,
+                policyPack: options.policyPack || undefined,
+                privacy: 'Console output, evidence, and support bundles must redact tokens, bearer headers, passwords, and secrets.',
+                telemetry: 'Installer evidence records local timings and failure categories only; it does not send telemetry.'
+            },
+            recovery: {
+                resume: options.resume,
+                retryFailed: options.retryFailed,
+                fromStep: options.fromStep || undefined,
+                cleanupAction: 'cleanup-workspace',
+                supportBundleAction: 'support-bundle'
+            },
+            customerCustomizationMap: this.customerCustomizationMap(options),
+            generatedFilePolicy: {
+                generated: ['.nodics-installer-identity.json', '.nodics-installer-lock.json', 'envs/*/generated'],
+                customerOwned: ['named backend project modules', 'named environment overrides', 'named company and commerce sites'],
+                vendorOwned: VENDOR_OWNED_REPOSITORIES
+            },
+            dataSeedReadiness: this.dataSeedReadiness(options),
+            publishingReadiness: this.publishingReadiness(options),
+            mediaAssetReadiness: this.mediaAssetReadiness(options),
+            beginnerNextSteps: [
+                'Open Axis at ' + (this.expectedUrls(options).axis || 'disabled') + '.',
+                'Open the company site at ' + (this.expectedUrls(options).companySite || 'disabled') + '.',
+                'Open the commerce site at ' + (this.expectedUrls(options).commerceSite || 'disabled') + '.',
+                'Keep custom work inside the named customer project, modules, environments, and sites.',
+                'Do not change nodics.ai or nodics.axis directly; report required framework or BackOffice changes upstream.'
+            ],
             accelerator: {
                 code: options.accelerator,
                 domains: profile.domains,
@@ -973,9 +1252,28 @@ const installer = {
 
     sanitizeOutput: function (value) {
         return String(value || '')
+            .replace(new RegExp(this.escapeRegExp(os.homedir()), 'g'), '[home]')
             .replace(/gh[pousr]_[A-Za-z0-9_]+/g, '[redacted-github-token]')
             .replace(/(authorization:\s*bearer\s+)[^\s]+/ig, '$1[redacted]')
             .replace(/((?:token|password|secret)=)[^\s&]+/ig, '$1[redacted]');
+    },
+
+    escapeRegExp: function (value) {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    },
+
+    sanitizeForSupportBundle: function (value) {
+        if (Array.isArray(value)) {
+            return value.map(item => this.sanitizeForSupportBundle(item));
+        }
+        if (value && typeof value === 'object') {
+            return Object.fromEntries(Object.entries(value)
+                .map(([key, entry]) => [key, this.sanitizeForSupportBundle(entry)]));
+        }
+        if (typeof value === 'string') {
+            return this.sanitizeOutput(value);
+        }
+        return value;
     },
 
     runCommand: function (executable, args, options) {
@@ -984,7 +1282,7 @@ const installer = {
             cwd: options.cwd,
             env: options.env || process.env,
             encoding: 'utf8',
-            shell: false
+            shell: Boolean(options.shell)
         });
         const entry = {
             command: [executable, ...(args || [])].join(' '),
@@ -1010,6 +1308,20 @@ const installer = {
             throw error;
         }
         return entry;
+    },
+
+    canWriteDirectory: function (directoryPath) {
+        if (!fs.existsSync(directoryPath)) {
+            return false;
+        }
+        const probePath = path.join(directoryPath, '.nodics-installer-write-test-' + process.pid + '-' + Date.now());
+        try {
+            fs.writeFileSync(probePath, 'ok');
+            fs.rmSync(probePath, { force: true });
+            return true;
+        } catch (error) {
+            return false;
+        }
     },
 
     spawnDetachedCommand: function (executable, args, options) {
@@ -1051,8 +1363,230 @@ const installer = {
         });
     },
 
-    preflight: async function (plan, options) {
+    parseMajorVersion: function (value) {
+        const match = String(value || '').match(/v?(\d+)\./);
+        return match ? Number(match[1]) : null;
+    },
+
+    supportedMajorStatus: function (value, support) {
+        const major = this.parseMajorVersion(value);
+        if (major === null) {
+            return 'unknown';
+        }
+        return major >= support.minimumMajor && major <= support.maximumMajor ? 'passed' : 'warning';
+    },
+
+    commandPathCheck: function (command) {
+        const resolved = String(process.env.PATH || '')
+            .split(path.delimiter)
+            .map(directory => path.join(directory, command))
+            .find(candidate => fs.existsSync(candidate));
+        return {
+            code: 'path-' + command,
+            required: false,
+            status: resolved ? 'passed' : 'warning',
+            path: resolved,
+            fix: resolved ? undefined : 'Add `' + command + '` to PATH or install it before running full local setup.'
+        };
+    },
+
+    diskSpaceCheck: function (targetPath) {
+        const root = fs.existsSync(targetPath) ? targetPath : path.dirname(targetPath);
+        const result = this.runCommand('df', ['-k', root], { cwd: process.cwd(), allowFailure: true });
+        if (result.status !== 'passed') {
+            return {
+                code: 'disk-space',
+                required: false,
+                status: 'warning',
+                fix: 'Ensure at least ' + SUPPORT_MATRIX.hardware.minimumDiskGb + 'GB free disk space before full setup.'
+            };
+        }
+        const rows = result.stdout.trim().split(/\r?\n/);
+        const columns = rows[rows.length - 1].split(/\s+/);
+        const availableGb = Number(columns[3] || 0) / 1024 / 1024;
+        return {
+            code: 'disk-space',
+            required: true,
+            status: availableGb >= SUPPORT_MATRIX.hardware.minimumDiskGb ? 'passed' : 'failed',
+            availableGb: Number(availableGb.toFixed(1)),
+            fix: availableGb >= SUPPORT_MATRIX.hardware.minimumDiskGb ? undefined :
+                'Free at least ' + SUPPORT_MATRIX.hardware.minimumDiskGb + 'GB before running setup.'
+        };
+    },
+
+    machineProfileChecks: function (options) {
+        const memoryGb = os.totalmem() / 1024 / 1024 / 1024;
+        const checks = [
+            {
+                code: 'os',
+                required: true,
+                status: ['darwin', 'linux', 'win32'].includes(process.platform) ? 'passed' : 'warning',
+                platform: process.platform,
+                arch: process.arch,
+                fix: ['darwin', 'linux', 'win32'].includes(process.platform) ? undefined :
+                    'Use macOS, Linux, or Windows with a supported shell.'
+            },
+            {
+                code: 'hardware-memory',
+                required: false,
+                status: memoryGb >= SUPPORT_MATRIX.hardware.minimumMemoryGb ? 'passed' : 'warning',
+                memoryGb: Number(memoryGb.toFixed(1)),
+                fix: memoryGb >= SUPPORT_MATRIX.hardware.minimumMemoryGb ? undefined :
+                    'Use at least ' + SUPPORT_MATRIX.hardware.minimumMemoryGb + 'GB RAM; ' +
+                    SUPPORT_MATRIX.hardware.recommendedMemoryGb + 'GB is recommended for full local topology.'
+            },
+            {
+                code: 'shell',
+                required: false,
+                status: process.env.SHELL ? 'passed' : 'warning',
+                shell: process.env.SHELL || '',
+                fix: process.env.SHELL ? undefined : 'Run from a normal terminal shell so PATH can be detected.'
+            },
+            this.diskSpaceCheck(options.workspace)
+        ];
+        if (process.platform === 'darwin') {
+            const brew = this.commandPathCheck('brew');
+            checks.push({
+                ...brew,
+                code: 'homebrew',
+                fix: brew.status === 'passed' ? undefined :
+                    'Install Homebrew from https://brew.sh, then use brew install node git redis mongodb-community where appropriate.'
+            });
+        }
+        return checks;
+    },
+
+    repositoryAccessChecks: function (plan, options) {
+        return plan.repositories.map(repository => {
+            const source = repository.repository;
+            const result = this.runCommand('git', ['ls-remote', '--heads', '--tags', source, options.release],
+                {
+                cwd: process.cwd(),
+                allowFailure: true
+            });
+            return {
+                code: 'git-access-' + repository.code,
+                required: false,
+                status: result.status === 'passed' && result.stdout.trim() ? 'passed' : 'warning',
+                repository: repository.name,
+                release: options.release,
+                fix: result.status === 'passed' && result.stdout.trim() ? undefined :
+                    'Check GitHub access, SSH keys or HTTPS credentials, proxy, and that branch/tag `' + options.release + '` exists.'
+            };
+        });
+    },
+
+    existingRepositoryHealthChecks: function (plan) {
+        return plan.repositories
+            .filter(repository => fs.existsSync(repository.targetPath))
+            .flatMap(repository => {
+                const checks = [];
+                if (this.isGitCheckout(repository.targetPath)) {
+                    const status = this.runCommand('git', ['status', '--short'], {
+                        cwd: repository.targetPath,
+                        allowFailure: true
+                    });
+                    checks.push({
+                        code: 'repository-drift-' + repository.code,
+                        required: VENDOR_OWNED_REPOSITORIES.includes(repository.name),
+                        status: status.status === 'passed' && !status.stdout.trim() ? 'passed' : 'warning',
+                        repository: repository.name,
+                        fix: status.status === 'passed' && !status.stdout.trim() ? undefined :
+                            'Review local changes. Vendor-owned repositories should be clean before setup, upgrade, or support handoff.'
+                    });
+                }
+                const packagePath = path.join(repository.targetPath, 'package.json');
+                const lockPath = path.join(repository.targetPath, 'package-lock.json');
+                if (fs.existsSync(packagePath)) {
+                    checks.push({
+                        code: 'dependency-strategy-' + repository.code,
+                        required: false,
+                        status: 'passed',
+                        repository: repository.name,
+                        strategy: fs.existsSync(lockPath) ? 'npm ci' : 'npm install',
+                        fix: fs.existsSync(lockPath) ? undefined :
+                            'No package-lock.json found; installer will use npm install and record the result.'
+                    });
+                }
+                if (fs.existsSync(path.join(repository.targetPath, 'node_modules')) && fs.existsSync(lockPath)) {
+                    checks.push({
+                        code: 'dependency-cache-' + repository.code,
+                        required: false,
+                        status: 'passed',
+                        repository: repository.name,
+                        fix: undefined
+                    });
+                }
+                return checks;
+            });
+    },
+
+    frontendEnvironmentChecks: function (options) {
         const checks = [];
+        const expectations = [
+            options.apps.includes('axis') ? {
+                code: 'axis',
+                path: path.join(options.application.axisPath, '.env'),
+                keys: { AXIS_PROJECT_CODE: options.application.projectName }
+            } : null,
+            options.companySite ? {
+                code: 'company-site',
+                path: path.join(options.application.companySitePath, '.env'),
+                keys: { NEXUS_PLATFORM_BASE_URL: 'http://localhost:4300' }
+            } : null,
+            options.commerceSite ? {
+                code: 'commerce-site',
+                path: path.join(options.application.commerceSitePath, '.env'),
+                keys: { VITE_STOREFRONT_COMMERCE_PROXY_TARGET: 'http://localhost:4350' }
+            } : null
+        ].filter(Boolean);
+        expectations.forEach(expectation => {
+            if (!fs.existsSync(expectation.path)) {
+                checks.push({
+                    code: 'frontend-env-' + expectation.code,
+                    required: false,
+                    status: 'warning',
+                    path: expectation.path,
+                    fix: 'Run repair or configure so frontend .env values match the generated backend ports.'
+                });
+                return;
+            }
+            const content = fs.readFileSync(expectation.path, 'utf8');
+            const missing = Object.entries(expectation.keys)
+                .filter(([key, value]) => !content.includes(key + '=' + value))
+                .map(([key]) => key);
+            checks.push({
+                code: 'frontend-env-' + expectation.code,
+                required: false,
+                status: missing.length ? 'warning' : 'passed',
+                path: expectation.path,
+                missing,
+                fix: missing.length ? 'Run --action=repair --yes to rewrite frontend local environment values.' : undefined
+            });
+        });
+        return checks;
+    },
+
+    policyPackCheck: function (options) {
+        if (!options.policyPack) {
+            return {
+                code: 'enterprise-policy-pack',
+                required: false,
+                status: 'skipped',
+                fix: 'Use --policy-pack=/path when an enterprise policy pack must be validated.'
+            };
+        }
+        return {
+            code: 'enterprise-policy-pack',
+            required: true,
+            status: fs.existsSync(options.policyPack) ? 'passed' : 'failed',
+            path: options.policyPack,
+            fix: fs.existsSync(options.policyPack) ? undefined : 'Provide a readable enterprise policy pack path.'
+        };
+    },
+
+    preflight: async function (plan, options) {
+        const checks = this.machineProfileChecks(options);
         const commandMap = {
             node: ['node', ['--version']],
             npm: ['npm', ['--version']],
@@ -1122,21 +1656,44 @@ const installer = {
                 continue;
             }
             const result = this.runCommand(executable, commandArgs, { cwd: process.cwd(), allowFailure: true });
+            let status = result.status;
+            let fix = result.status === 'passed' ? undefined : 'Install or make `' + executable + '` available on PATH.';
+            if (result.status === 'passed' && prerequisite.code === 'node') {
+                status = this.supportedMajorStatus(result.stdout, SUPPORT_MATRIX.node);
+                fix = status === 'passed' ? undefined : 'Install Node.js ' + SUPPORT_MATRIX.node.recommended + '.';
+            }
+            if (result.status === 'passed' && prerequisite.code === 'npm') {
+                status = this.supportedMajorStatus(result.stdout, SUPPORT_MATRIX.npm);
+                fix = status === 'passed' ? undefined : 'Install npm ' + SUPPORT_MATRIX.npm.recommended + '.';
+            }
             checks.push({
                 code: prerequisite.code,
                 required: prerequisite.required,
-                status: result.status,
+                status,
                 version: result.stdout.trim() || result.stderr.trim(),
-                fix: result.status === 'passed' ? undefined : 'Install or make `' + executable + '` available on PATH.'
+                fix
             });
         }
+        ['node', 'npm', 'git'].forEach(command => checks.push(this.commandPathCheck(command)));
         const workspaceParent = path.dirname(options.workspace);
         checks.push({
             code: 'workspace-parent',
             required: true,
             status: fs.existsSync(workspaceParent) ? 'passed' : 'failed',
-            path: workspaceParent
+            path: workspaceParent,
+            fix: fs.existsSync(workspaceParent) ? undefined : 'Create the parent folder or choose another --workspace path.'
         });
+        checks.push({
+            code: 'workspace-write',
+            required: true,
+            status: this.canWriteDirectory(workspaceParent) ? 'passed' : 'failed',
+            path: workspaceParent,
+            fix: this.canWriteDirectory(workspaceParent) ? undefined : 'Choose a writable workspace parent folder.'
+        });
+        checks.push(...this.repositoryAccessChecks(plan, options));
+        checks.push(...this.existingRepositoryHealthChecks(plan));
+        checks.push(...this.frontendEnvironmentChecks(options));
+        checks.push(this.policyPackCheck(options));
         const ports = Object.values(plan.expectedUrls)
             .filter(Boolean)
             .map(value => Number(new URL(value).port))
@@ -1146,8 +1703,11 @@ const installer = {
             checks.push({ code: 'port-' + port, required: true, status: busy ? 'failed' : 'passed', busy });
         }
         return {
+            contractVersion: JSON_RESULT_CONTRACTS.preflight,
             operation: 'local-setup-preflight',
-            ok: checks.every(check => check.status === 'passed' || check.status === 'skipped' || !check.required),
+            supportMatrix: SUPPORT_MATRIX,
+            portPlan: plan.portPlan,
+            ok: checks.every(check => check.status === 'passed' || check.status === 'skipped' || check.status === 'warning' || !check.required),
             checks
         };
     },
@@ -1163,6 +1723,18 @@ const installer = {
             startedAt: new Date().toISOString(),
             finishedAt: undefined,
             plan,
+            progress: {
+                currentStep: undefined,
+                completedSteps: 0,
+                totalPlannedSteps: plan.setupSteps.length,
+                lastCommand: undefined,
+                nextStep: 'download'
+            },
+            localMetrics: {
+                telemetrySent: false,
+                stepCount: 0,
+                failureCategories: []
+            },
             steps: []
         };
     },
@@ -1173,7 +1745,30 @@ const installer = {
         evidence.executionLevel = options.executionLevel;
         evidence.release = options.release;
         evidence.plan = plan;
+        evidence.progress = evidence.progress || {
+            completedSteps: evidence.steps ? evidence.steps.length : 0,
+            totalPlannedSteps: plan.setupSteps.length
+        };
+        evidence.localMetrics = evidence.localMetrics || { telemetrySent: false, stepCount: 0, failureCategories: [] };
         evidence.finishedAt = undefined;
+        return evidence;
+    },
+
+    prepareEvidenceForResume: function (evidence, options) {
+        if (options.retryFailed) {
+            evidence.steps = evidence.steps.filter(step => step.status !== 'failed');
+        }
+        if (options.fromStep) {
+            const order = [
+                'download', 'rebrand', 'vendor-boundary', 'install-framework', 'configure', 'install',
+                'preflight', 'topology-preflight', 'start', 'initialize', 'acceptance'
+            ];
+            const startIndex = order.indexOf(options.fromStep);
+            if (startIndex !== -1) {
+                const rerun = new Set(order.slice(startIndex));
+                evidence.steps = evidence.steps.filter(step => !rerun.has(step.code));
+            }
+        }
         return evidence;
     },
 
@@ -1297,6 +1892,20 @@ const installer = {
             ...recordedStep,
             timestamp: new Date().toISOString()
         });
+        evidence.progress = evidence.progress || {};
+        evidence.progress.currentStep = recordedStep.code;
+        evidence.progress.completedSteps = evidence.steps.length;
+        evidence.progress.lastCommand = recordedStep.result && recordedStep.result.command;
+        evidence.progress.nextStep = undefined;
+        evidence.localMetrics = evidence.localMetrics || { telemetrySent: false, failureCategories: [] };
+        evidence.localMetrics.telemetrySent = false;
+        evidence.localMetrics.stepCount = evidence.steps.length;
+        if (recordedStep.status === 'failed' && recordedStep.result && recordedStep.result.diagnosis) {
+            evidence.localMetrics.failureCategories = Array.from(new Set([
+                ...(evidence.localMetrics.failureCategories || []),
+                recordedStep.result.diagnosis.code
+            ]));
+        }
         this.writeEvidence(evidencePath, evidence);
     },
 
@@ -1604,13 +2213,90 @@ const installer = {
         return identityPath;
     },
 
+    installerLock: function (plan, options) {
+        return {
+            contractVersion: 1,
+            installer: {
+                packageName: plan.installer.packageName,
+                version: VERSION
+            },
+            generatedAt: new Date().toISOString(),
+            application: {
+                name: options.application.name,
+                code: options.application.code,
+                projectName: options.application.projectName,
+                environment: this.initialProvisioning(options).environment,
+                accelerator: options.accelerator,
+                environmentProfile: options.environmentProfile,
+                acceptanceProfile: options.acceptanceProfile
+            },
+            sourceTemplate: options.application.sourceTemplate,
+            preservedSourceTemplateIdentity: options.application.preservesSourceTemplateIdentity,
+            release: options.release,
+            releaseChannel: options.releaseChannel,
+            repositories: plan.repositories.map(repository => ({
+                code: repository.code,
+                name: repository.name,
+                release: repository.release,
+                path: repository.targetPath,
+                vendorOwned: VENDOR_OWNED_REPOSITORIES.includes(repository.name)
+            })),
+            sites: {
+                company: options.companySite ? options.application.companySiteName : undefined,
+                commerce: options.commerceSite ? options.application.commerceSiteName : undefined
+            },
+            ownership: this.customerCustomizationMap(options)
+        };
+    },
+
+    writeInstallerLock: function (rootPath, plan, options) {
+        const lockPath = path.join(rootPath, '.nodics-installer-lock.json');
+        this.writeJsonFile(lockPath, this.installerLock(plan, options));
+        return lockPath;
+    },
+
+    readStarterTemplateDescriptor: function (options) {
+        const descriptorPath = path.join(options.application.projectPath, 'nodics.installer.json');
+        if (!fs.existsSync(descriptorPath)) {
+            return null;
+        }
+        return this.readJsonFile(descriptorPath);
+    },
+
     starterTemplateAcceptanceCapabilities: function (options) {
+        const descriptor = fs.existsSync(options.application.projectPath) ?
+            this.readStarterTemplateDescriptor(options) : null;
+        const descriptorCapabilities = descriptor && descriptor.acceptance;
+        if (descriptorCapabilities) {
+            const capabilities = options.application.preservesSourceTemplateIdentity ?
+                descriptorCapabilities.preservedIdentity : descriptorCapabilities.generatedProject;
+            if (capabilities) {
+                this.assertValidStarterTemplateCapabilities(capabilities);
+                return capabilities;
+            }
+        }
         const template = STARTER_TEMPLATE_REGISTRY[options.application.sourceTemplate];
         if (!template) {
             return { documentationPacks: [], routes: [], expectDocumentation: false };
         }
         return options.application.preservesSourceTemplateIdentity ?
             template.preservedIdentity : template.generatedProject;
+    },
+
+    assertValidStarterTemplateCapabilities: function (capabilities) {
+        const errors = [];
+        if (!Array.isArray(capabilities.documentationPacks)) {
+            errors.push('acceptance.generatedProject.documentationPacks must be an array.');
+        }
+        if (!Array.isArray(capabilities.routes)) {
+            errors.push('acceptance.generatedProject.routes must be an array.');
+        }
+        if (typeof capabilities.expectDocumentation !== 'boolean') {
+            errors.push('acceptance.generatedProject.expectDocumentation must be true or false.');
+        }
+        if (errors.length) {
+            throw new Error('Starter template capability descriptor is invalid:\n- ' + errors.join('\n- '));
+        }
     },
 
     localBootstrapAcceptanceCapabilities: function (options) {
@@ -1760,6 +2446,7 @@ const installer = {
         };
         changed.push(...this.updatePackageName(options.application.projectPath, options.application.projectName, options.application.name));
         changed.push(this.writeInstallerIdentity(options.application.projectPath, projectIdentity));
+        changed.push(this.writeInstallerLock(options.application.projectPath, plan, options));
         changed.push(...this.renameProjectIdentityPaths(options.application.projectPath, options));
         changed.push(...this.updateProjectTopologyIdentity(options.application.projectPath, options));
         changed.push(...this.rebrandProjectFiles(options.application.projectPath, options));
@@ -1950,7 +2637,8 @@ const installer = {
             this.runProjectCommand(options, 'docker-local:acceptance', [], false) :
             this.runProjectCommand(options, 'acceptance:local', [], false, {
                 AXIS_PROJECT: options.application.projectName,
-                NODICS_AXIS_ROOT: options.application.axisPath
+                NODICS_AXIS_ROOT: options.application.axisPath,
+                NODICS_ACCEPTANCE_PROFILE: options.acceptanceProfile
             });
     },
 
@@ -2279,7 +2967,7 @@ const installer = {
             },
             dependencies: {},
             nodics: {
-                kind: 'capability',
+                kind: options.modulePreset,
                 owner: options.application.projectName,
                 runtimeModule: true,
                 loadableByNodicsModuleLoader: true,
@@ -2337,7 +3025,8 @@ const installer = {
         ];
         changed.push(...this.updateProjectExpansionMetadata(options, 'modules', {
             name: options.moduleName,
-            kind: 'customer-module'
+            kind: 'customer-module',
+            preset: options.modulePreset
         }));
         const relativeChanged = Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath));
         const evidencePath = this.writeExpansionEvidence(options, {
@@ -2349,6 +3038,7 @@ const installer = {
             operation: 'local-expansion-add-module',
             ok: true,
             moduleName: options.moduleName,
+            modulePreset: options.modulePreset,
             modulePath,
             changed: relativeChanged,
             evidencePath
@@ -2532,7 +3222,15 @@ const installer = {
         const evidence = this.readEvidence(plan.evidencePath);
         const topology = fs.existsSync(options.application.projectPath) ? this.readTopologyStatus(options) : null;
         const projectDescriptor = this.readProjectDescriptor(options);
+        const structureAudit = this.auditGeneratedProjectStructure(options);
+        let vendorBoundary;
+        try {
+            vendorBoundary = this.vendorBoundaryStatus(options);
+        } catch (error) {
+            vendorBoundary = { ok: false, error: error.message };
+        }
         return {
+            contractVersion: JSON_RESULT_CONTRACTS.status,
             operation: 'local-setup-status',
             ok: Boolean(topology && this.topologyIsReady(topology.status)),
             installer: plan.installer,
@@ -2561,6 +3259,13 @@ const installer = {
                 environment: projectDescriptor.topology && projectDescriptor.topology.environment,
                 stateDirectory: projectDescriptor.topology && projectDescriptor.topology.stateDirectory
             } : null,
+            structureAudit,
+            aiOnboarding: this.aiOnboardingStatus(options),
+            vendorBoundary,
+            customizationMap: this.customerCustomizationMap(options),
+            dataSeedReadiness: this.dataSeedReadiness(options),
+            publishingReadiness: this.publishingReadiness(options),
+            mediaAssetReadiness: this.mediaAssetReadiness(options),
             expectedUrls: plan.expectedUrls,
             logDirectory: this.resolveTopologyStateDirectory(options, projectDescriptor)
         };
@@ -2601,7 +3306,57 @@ const installer = {
         if (status.logDirectory) {
             lines.push('', 'Logs: ' + status.logDirectory);
         }
+        if (status.structureAudit) {
+            lines.push('', 'Project structure audit: ' + status.structureAudit.status);
+        }
+        lines.push('', 'Customer customization map:');
+        Object.entries(status.customizationMap).forEach(([key, value]) => {
+            lines.push('- ' + key + ': ' + (Array.isArray(value) ? value.join(', ') : value || 'disabled'));
+        });
         return lines.join('\n');
+    },
+
+    renderInventory: function (result) {
+        const lines = ['Nodics workspace inventory', 'Workspace: ' + result.workspace];
+        result.items.forEach(item => {
+            lines.push('- ' + item.name + ': ' + item.kind +
+                (item.vendorOwned ? ' vendor-owned' : '') +
+                (item.projectCode ? ' project=' + item.projectCode : '') +
+                (item.environment ? ' env=' + item.environment : ''));
+        });
+        return lines.join('\n');
+    },
+
+    renderUpgradeCheck: function (result) {
+        const lines = ['Nodics upgrade readiness ' + (result.ok ? 'passed' : 'needs review')];
+        if (!result.findings.length) {
+            lines.push('No upgrade drift found.');
+            return lines.join('\n');
+        }
+        result.findings.forEach(finding => {
+            lines.push('- ' + finding.code + ': ' + finding.severity + (finding.fix ? ' - ' + finding.fix : ''));
+        });
+        return lines.join('\n');
+    },
+
+    renderSelfCheck: function (result) {
+        const lines = [
+            'Nodics Installer self-check ' + (result.ok ? 'passed' : 'failed'),
+            result.packageName + ' ' + result.version,
+            'npm/npx review: ' + result.npmNpxReview.status
+        ];
+        result.files.forEach(file => lines.push('- file ' + file.path + ': ' + file.status));
+        result.commandChecks.forEach(check => lines.push('- command ' + check.code + ': ' + check.status));
+        return lines.join('\n');
+    },
+
+    renderSupportBundle: function (result) {
+        return [
+            'Nodics support bundle created',
+            'Bundle: ' + result.bundleRoot,
+            'Archive: ' + (result.archivePath || result.archiveStatus),
+            'Privacy: ' + result.privacy
+        ].join('\n');
     },
 
     stopTopology: function (options, allowFailure) {
@@ -2627,6 +3382,240 @@ const installer = {
             ok: true,
             changed,
             configure
+        };
+    },
+
+    auditGeneratedProjectStructure: function (options) {
+        const projectPath = options.application.projectPath;
+        const required = [
+            'package.json',
+            'nodics.js',
+            'nodics.project.json',
+            'AGENTS.md',
+            'README.md',
+            'llm/contracts/README.md',
+            'llm/examples/README.md',
+            'modules',
+            'envs',
+            '.nodics-installer-identity.json',
+            '.nodics-installer-lock.json'
+        ];
+        const missing = required.filter(relativePath => !fs.existsSync(path.join(projectPath, relativePath)));
+        const moduleNames = [
+            options.application.coreModuleName,
+            options.application.apiModuleName,
+            options.application.integrationModuleName
+        ];
+        moduleNames.forEach(moduleName => {
+            ['package.json', 'nodics.js', 'AGENTS.md', 'README.md'].forEach(fileName => {
+                const relativePath = path.join('modules', moduleName, fileName);
+                if (!fs.existsSync(path.join(projectPath, relativePath))) {
+                    missing.push(relativePath);
+                }
+            });
+        });
+        const environmentPath = path.join('envs', this.initialProvisioning(options).environment);
+        if (!fs.existsSync(path.join(projectPath, environmentPath))) {
+            missing.push(environmentPath);
+        }
+        return {
+            status: missing.length ? 'warning' : 'passed',
+            checkedRoot: projectPath,
+            missing,
+            fix: missing.length ? 'Run --action=repair --yes or regenerate the missing customer-owned files.' : undefined
+        };
+    },
+
+    aiOnboardingStatus: function (options) {
+        const roots = [
+            options.application.projectPath,
+            path.join(options.application.projectPath, 'modules'),
+            path.join(options.application.projectPath, 'envs'),
+            options.companySite ? options.application.companySitePath : null,
+            options.commerceSite ? options.application.commerceSitePath : null
+        ].filter(Boolean);
+        const missing = roots
+            .filter(root => fs.existsSync(root))
+            .filter(root => !fs.existsSync(path.join(root, 'AGENTS.md')))
+            .map(root => path.relative(options.workspace, root));
+        return {
+            status: missing.length ? 'warning' : 'passed',
+            rootsChecked: roots.map(root => path.relative(options.workspace, root)),
+            missingAgents: missing,
+            protectedVendorRoots: VENDOR_OWNED_REPOSITORIES,
+            guidance: 'AI tools should read AGENTS.md and keep edits inside customer-owned roots unless a Nodics source change is explicitly approved.'
+        };
+    },
+
+    workspaceInventory: function (options) {
+        const entries = fs.existsSync(options.workspace) ?
+            fs.readdirSync(options.workspace, { withFileTypes: true }).filter(entry => entry.isDirectory()) : [];
+        const items = entries.map(entry => {
+            const root = path.join(options.workspace, entry.name);
+            const identityPath = path.join(root, '.nodics-installer-identity.json');
+            const lockPath = path.join(root, '.nodics-installer-lock.json');
+            const descriptorPath = path.join(root, 'nodics.project.json');
+            const identity = fs.existsSync(identityPath) ? this.readJsonFile(identityPath) : null;
+            const lock = fs.existsSync(lockPath) ? this.readJsonFile(lockPath) : null;
+            const descriptor = fs.existsSync(descriptorPath) ? this.readJsonFile(descriptorPath) : null;
+            return {
+                name: entry.name,
+                path: root,
+                kind: identity && identity.kind || (descriptor ? 'project' : 'repository'),
+                generated: Boolean(identity),
+                vendorOwned: VENDOR_OWNED_REPOSITORIES.includes(entry.name),
+                applicationName: identity && identity.applicationName,
+                siteName: identity && identity.siteName,
+                projectCode: descriptor && descriptor.projectCode,
+                environment: descriptor && descriptor.topology && descriptor.topology.environment,
+                installerVersion: lock && lock.installer && lock.installer.version
+            };
+        });
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.inventory,
+            operation: 'local-workspace-inventory',
+            ok: true,
+            workspace: options.workspace,
+            items
+        };
+    },
+
+    upgradeCheck: function (plan, options) {
+        const lockPath = path.join(options.application.projectPath, '.nodics-installer-lock.json');
+        const lock = fs.existsSync(lockPath) ? this.readJsonFile(lockPath) : null;
+        const expectedCapabilities = this.localBootstrapAcceptanceCapabilities(options);
+        const descriptor = this.readProjectDescriptor(options);
+        const findings = [];
+        if (!lock) {
+            findings.push({
+                code: 'missing-installer-lock',
+                severity: 'warning',
+                fix: 'Run --action=repair --yes to write generated metadata before an upgrade.'
+            });
+        } else {
+            if (lock.installer && lock.installer.version !== VERSION) {
+                findings.push({
+                    code: 'installer-version-drift',
+                    severity: 'info',
+                    current: VERSION,
+                    installed: lock.installer.version,
+                    fix: 'Review generated files before applying a newer installer.'
+                });
+            }
+            if (lock.application && lock.application.accelerator !== options.accelerator) {
+                findings.push({
+                    code: 'accelerator-drift',
+                    severity: 'warning',
+                    expected: options.accelerator,
+                    actual: lock.application.accelerator,
+                    fix: 'Use the original accelerator or intentionally add a new site/module through expansion commands.'
+                });
+            }
+        }
+        if (descriptor && JSON.stringify(descriptor.acceptance && descriptor.acceptance.localBootstrap) !== JSON.stringify(expectedCapabilities)) {
+            findings.push({
+                code: 'local-bootstrap-capability-drift',
+                severity: 'warning',
+                fix: 'Run --action=repair --yes to align acceptance.localBootstrap with current installer rules.'
+            });
+        }
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.upgradeCheck,
+            operation: 'local-upgrade-check',
+            ok: !findings.some(finding => finding.severity === 'error'),
+            lockPath,
+            findings
+        };
+    },
+
+    selfCheck: function (plan, options) {
+        const packageJson = this.readJsonFile(path.resolve(__dirname, '..', 'package.json'));
+        const requiredFiles = ['package.json', 'bin/nodics-installer.js', 'src/installer.js', 'README.md', 'AGENTS.md'];
+        const files = requiredFiles.map(relativePath => ({
+            path: relativePath,
+            status: fs.existsSync(path.resolve(__dirname, '..', relativePath)) ? 'passed' : 'failed'
+        }));
+        const commandChecks = ['node', 'npm', 'git'].map(command => this.commandPathCheck(command));
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.selfCheck,
+            operation: 'local-installer-self-check',
+            ok: files.every(file => file.status === 'passed') &&
+                commandChecks.every(check => check.status === 'passed' || check.status === 'warning'),
+            packageName: packageJson.name,
+            version: VERSION,
+            npmNpxReview: {
+                currentBootstrapCommand: 'npx github:Nodics/nodics.installer',
+                npmPackageCommand: 'npx @nodics/installer',
+                status: 'review-only',
+                rule: 'Do not change package identity, bin, publishConfig, tags, or publish flow without explicit plan approval.'
+            },
+            files,
+            commandChecks,
+            jsonContracts: JSON_RESULT_CONTRACTS
+        };
+    },
+
+    supportBundle: function (plan, options) {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const bundleRoot = options.supportBundlePath ?
+            path.resolve(options.supportBundlePath) :
+            path.join(options.workspace, '.nodics-installer', 'support-bundle-' + stamp);
+        const evidence = this.readEvidence(plan.evidencePath);
+        const status = this.setupStatus(plan, options);
+        const logs = this.logsStatus(options);
+        fs.mkdirSync(bundleRoot, { recursive: true });
+        this.writeJsonFile(path.join(bundleRoot, 'support.json'), {
+            contractVersion: JSON_RESULT_CONTRACTS.supportBundle,
+            operation: 'local-support-bundle',
+            createdAt: new Date().toISOString(),
+            privacy: 'Sanitized local evidence only; no telemetry was sent.',
+            evidence: this.sanitizeForSupportBundle(evidence),
+            status: this.sanitizeForSupportBundle(status),
+            logs: this.sanitizeForSupportBundle(logs)
+        });
+        const archivePath = bundleRoot + '.tar.gz';
+        const tar = this.runCommand('tar', ['-czf', archivePath, '-C', path.dirname(bundleRoot), path.basename(bundleRoot)], {
+            cwd: options.workspace,
+            allowFailure: true
+        });
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.supportBundle,
+            operation: 'local-support-bundle',
+            ok: true,
+            bundleRoot,
+            archivePath: tar.status === 'passed' ? archivePath : undefined,
+            archiveStatus: tar.status,
+            privacy: 'Secrets are redacted by the installer sanitizer before evidence and logs are included.'
+        };
+    },
+
+    cleanupWorkspace: function (plan, options) {
+        const topology = fs.existsSync(options.application.projectPath) ? this.readTopologyStatus(options) : null;
+        if (topology && this.topologyIsReady(topology.status)) {
+            throw new Error('Refusing to cleanup workspace while topology is running. Run --action=stop --yes first.');
+        }
+        const protectedRoots = new Set(VENDOR_OWNED_REPOSITORIES);
+        const candidates = plan.repositories
+            .filter(repository => !protectedRoots.has(repository.name))
+            .map(repository => repository.targetPath)
+            .filter(root => fs.existsSync(root))
+            .filter(root => fs.existsSync(path.join(root, '.nodics-installer-identity.json')) ||
+                fs.existsSync(path.join(root, '.nodics-installer-lock.json')));
+        const removed = [];
+        candidates.forEach(root => {
+            fs.rmSync(root, { recursive: true, force: true });
+            removed.push(root);
+        });
+        const evidenceRoot = path.join(options.workspace, '.nodics-installer');
+        if (fs.existsSync(evidenceRoot)) {
+            fs.rmSync(evidenceRoot, { recursive: true, force: true });
+            removed.push(evidenceRoot);
+        }
+        return {
+            operation: 'local-workspace-cleanup',
+            ok: true,
+            removed,
+            protectedRoots: Array.from(protectedRoots)
         };
     },
 
@@ -2664,9 +3653,11 @@ const installer = {
                 runtime: path.basename(filePath, '.log'),
                 path: filePath,
                 sizeBytes: fs.statSync(filePath).size,
-                excerpt: this.readLastLines(filePath, options.lines)
+                excerpt: this.readLastLines(filePath, options.lines),
+                signals: this.logSignals(this.readLastLines(filePath, options.lines))
             }));
         return {
+            contractVersion: JSON_RESULT_CONTRACTS.logs,
             operation: 'local-setup-logs',
             ok: logs.length > 0,
             runtime: runtime || undefined,
@@ -2674,6 +3665,24 @@ const installer = {
             logDirectory: this.resolveTopologyStateDirectory(options),
             logs
         };
+    },
+
+    logSignals: function (excerpt) {
+        const signals = [];
+        const text = String(excerpt || '');
+        if (/EADDRINUSE|address already in use|port .*already/i.test(text)) {
+            signals.push({ code: 'port-conflict', fix: 'Stop the process holding the port or select an alternate port pack.' });
+        }
+        if (/ECONNREFUSED|connection refused/i.test(text)) {
+            signals.push({ code: 'dependency-not-listening', fix: 'Start the dependent service and rerun status or acceptance.' });
+        }
+        if (/Import completed with record-level errors|Media reference was not found/i.test(text)) {
+            signals.push({ code: 'data-import-error', fix: 'Inspect import error artifacts and rerun initialization after correcting data order.' });
+        }
+        if (/Error|Exception|UnhandledPromiseRejection|failed/i.test(text)) {
+            signals.push({ code: 'runtime-error', fix: 'Read the last error block above and run support-bundle if help is needed.' });
+        }
+        return signals;
     },
 
     renderLogs: function (result) {
@@ -2687,6 +3696,10 @@ const installer = {
         }
         result.logs.forEach(log => {
             lines.push('', '== ' + log.runtime + ' ==', log.path, log.excerpt || '(empty)');
+            if (log.signals.length) {
+                lines.push('Signals:');
+                log.signals.forEach(signal => lines.push('- ' + signal.code + ': ' + signal.fix));
+            }
         });
         return lines.join('\n');
     },
@@ -2817,11 +3830,11 @@ const installer = {
     },
 
     executeSetup: async function (plan, options) {
-        const evidence = this.refreshEvidenceContext(
+        const evidence = this.prepareEvidenceForResume(this.refreshEvidenceContext(
             this.readEvidence(plan.evidencePath) || this.createEvidence(plan, options),
             plan,
             options
-        );
+        ), options);
         const runStage = (code, label, callback, stageVersion) => {
             if (this.stepCompleted(evidence, code, stageVersion)) {
                 return;
@@ -3001,6 +4014,26 @@ const installer = {
             this.printResult(options, result, logs => this.renderLogs(logs));
             return true;
         }
+        if (options.action === 'inventory') {
+            const result = this.workspaceInventory(options);
+            this.printResult(options, result, inventory => this.renderInventory(inventory));
+            return true;
+        }
+        if (options.action === 'upgrade-check') {
+            const result = this.upgradeCheck(plan, options);
+            this.printResult(options, result, upgrade => this.renderUpgradeCheck(upgrade));
+            return true;
+        }
+        if (options.action === 'self-check') {
+            const result = this.selfCheck(plan, options);
+            this.printResult(options, result, check => this.renderSelfCheck(check));
+            return true;
+        }
+        if (options.action === 'support-bundle') {
+            const result = this.supportBundle(plan, options);
+            this.printResult(options, result, bundle => this.renderSupportBundle(bundle));
+            return true;
+        }
         if (options.action === 'troubleshooting') {
             const result = this.troubleshootingStatus();
             this.printResult(options, result, troubleshooting => this.renderTroubleshooting(troubleshooting));
@@ -3051,6 +4084,20 @@ const installer = {
             const result = this.cleanGeneratedRuntime(options);
             this.printResult(options, result, clean => 'Nodics generated runtime clean completed\nRemoved: ' +
                 (clean.removed.length ? clean.removed.join('\n') : 'nothing'));
+            return true;
+        }
+        if (options.action === 'cleanup-workspace') {
+            const result = this.cleanupWorkspace(plan, options);
+            this.printResult(options, result, cleanup => 'Nodics generated workspace cleanup completed\nProtected: ' +
+                cleanup.protectedRoots.join(', ') + '\nRemoved: ' + (cleanup.removed.length ? cleanup.removed.join('\n') : 'nothing'));
+            return true;
+        }
+        if (options.action === 'uninstall') {
+            const stop = fs.existsSync(options.application.projectPath) ? this.stopTopology(options, true) : { status: 'skipped' };
+            const cleanup = this.cleanupWorkspace(plan, options);
+            const result = { operation: 'local-workspace-uninstall', ok: true, stop, cleanup };
+            this.printResult(options, result, uninstall => 'Nodics local uninstall completed\nStop: ' +
+                uninstall.stop.status + '\nRemoved: ' + (uninstall.cleanup.removed.length ? uninstall.cleanup.removed.join('\n') : 'nothing'));
             return true;
         }
         if (options.action === 'add-environment') {

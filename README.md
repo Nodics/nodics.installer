@@ -183,11 +183,34 @@ what will happen before the machine is changed.
 | Acceptance | `npx github:Nodics/nodics.installer --action=acceptance --yes` | Starts if needed, then runs local acceptance checks. |
 | Repair | `npx github:Nodics/nodics.installer --action=repair --yes` | Reapplies installer identity and framework links without recloning. |
 | Clean | `npx github:Nodics/nodics.installer --action=clean --yes` | Removes generated runtime files only; refuses while topology is running. |
+| Cleanup workspace | `npx github:Nodics/nodics.installer --action=cleanup-workspace --yes` | Removes installer-created customer roots and setup evidence while protecting vendor repositories. |
+| Uninstall | `npx github:Nodics/nodics.installer --action=uninstall --yes` | Stops topology, then runs safe generated workspace cleanup. |
+| Inventory | `npx github:Nodics/nodics.installer --action=inventory` | Lists Nodics repositories, generated projects, sites, environments, and installer metadata in a workspace. |
+| Support bundle | `npx github:Nodics/nodics.installer --action=support-bundle --yes` | Exports sanitized evidence, status, and log excerpts for support handoff. |
+| Upgrade check | `npx github:Nodics/nodics.installer --action=upgrade-check` | Compares generated metadata and local acceptance capabilities with current installer rules. |
+| Self-check | `npx github:Nodics/nodics.installer --action=self-check` | Validates installer files, local commands, JSON contracts, and npm/npx readiness status. |
 | Troubleshooting | `npx github:Nodics/nodics.installer --action=troubleshooting` | Prints known beginner failure signatures and first fixes. |
 | Version | `npx github:Nodics/nodics.installer --action=version` | Prints installer version, engines, and supported actions. |
 
 Mutating actions never run unless `--yes` is present. This includes `execute`,
-`start`, `stop`, `restart`, `initialize`, `acceptance`, `repair`, and `clean`.
+`start`, `stop`, `restart`, `initialize`, `acceptance`, `repair`, `clean`,
+`support-bundle`, `cleanup-workspace`, and `uninstall`.
+
+## Enterprise Options
+
+The installer records enterprise setup choices in the plan and evidence:
+
+- `--environment-profile=local-dev|local-demo|local-qa|docker-local`
+- `--acceptance-profile=smoke|standard|full`
+- `--release-channel=development|stable|explicit`
+- `--resume`, `--retry-failed`, and `--from-step=<step-code>`
+- `--alternate-ports`
+- `--policy-pack=/path`, `--offline-cache=/path`, `--proxy=...`, and
+  `--npm-registry=...`
+
+`stable` maps to `master` when `--release` is not supplied. Explicit
+`--release=<branch-or-tag>` always wins. The npm package identity and bootstrap
+commands remain review-only until a release owner approves npm publication.
 
 ## Beginner Journey
 

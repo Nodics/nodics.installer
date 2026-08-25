@@ -96,6 +96,49 @@ If setup is interrupted, rerun the same command. Completed stages are skipped
 only when their stage version is still current. Stages that interact with live
 topology state re-check the machine rather than trusting old evidence.
 
+Recovery controls:
+
+- `--resume` records operator intent to continue from existing evidence;
+- `--retry-failed` removes failed evidence steps before execution;
+- `--from-step=<step-code>` removes that step and later steps before execution;
+- `cleanup-workspace` removes only installer-created customer roots and setup
+  evidence, while protecting `nodics.ai` and `nodics.axis`;
+- `uninstall` stops topology first, then runs the same safe cleanup policy.
+
+## Enterprise Command Surface
+
+The installer exposes these enterprise inspection and support actions:
+
+- `inventory` lists generated projects, sites, environments, vendor roots, and
+  installer metadata in a workspace;
+- `upgrade-check` compares `.nodics-installer-lock.json` and
+  `acceptance.localBootstrap` with current installer expectations;
+- `support-bundle --yes` writes sanitized evidence, status, and log excerpts,
+  then attempts to create a `.tar.gz` archive;
+- `self-check` validates installer files, local command readiness, JSON result
+  contracts, and npm/npx readiness without changing package identity.
+
+Support bundles are local-only. The installer redacts bearer headers, tokens,
+passwords, secrets, and the local home path before writing support evidence.
+
+## Profiles And Readiness
+
+Plans and evidence now include:
+
+- environment profiles: `local-dev`, `local-demo`, `local-qa`, `docker-local`;
+- acceptance profiles: `smoke`, `standard`, `full`;
+- release channels: `development`, `stable`, `explicit`;
+- support matrix for Node.js, npm, Git, MongoDB, Redis, Elasticsearch, Docker,
+  RAM, and disk;
+- service dependency graph for backend runtimes and selected frontends;
+- port plan with optional alternate-port preview;
+- database lifecycle policy for retained data versus fresh data;
+- generated/customer/vendor file ownership policy;
+- data seed, publishing, media, and runtime health readiness summaries.
+
+`stable` maps to `master` only when `--release` is not supplied. Explicit branch
+or tag selection remains the source of truth.
+
 ## Beginner Failure Catalog
 
 Run:
