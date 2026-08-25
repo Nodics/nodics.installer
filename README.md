@@ -189,12 +189,19 @@ what will happen before the machine is changed.
 | Support bundle | `npx github:Nodics/nodics.installer --action=support-bundle --yes` | Exports sanitized evidence, status, and log excerpts for support handoff. |
 | Upgrade check | `npx github:Nodics/nodics.installer --action=upgrade-check` | Compares generated metadata and local acceptance capabilities with current installer rules. |
 | Self-check | `npx github:Nodics/nodics.installer --action=self-check` | Validates installer files, local commands, JSON contracts, and npm/npx readiness status. |
+| Workspace manifest | `npx github:Nodics/nodics.installer --action=workspace-manifest --yes` | Writes `.nodics-workspace.json` so tools can identify generated and vendor roots. |
+| Update vendors | `npx github:Nodics/nodics.installer --action=update-vendors --yes` | Fast-forwards only clean `nodics.ai` and `nodics.axis` checkouts. |
+| Diff review | `npx github:Nodics/nodics.installer --action=diff-review` | Groups local Git changes by generated/customer/vendor ownership. |
+| Data readiness | `npx github:Nodics/nodics.installer --action=data-readiness` | Checks seed manifests and local media/data readiness. |
+| Publishing check | `npx github:Nodics/nodics.installer --action=publishing-check` | Checks staged/online/process/media readiness before publishing acceptance. |
+| Health | `npx github:Nodics/nodics.installer --action=health` | Checks expected local runtime URLs after topology start. |
 | Troubleshooting | `npx github:Nodics/nodics.installer --action=troubleshooting` | Prints known beginner failure signatures and first fixes. |
 | Version | `npx github:Nodics/nodics.installer --action=version` | Prints installer version, engines, and supported actions. |
 
 Mutating actions never run unless `--yes` is present. This includes `execute`,
 `start`, `stop`, `restart`, `initialize`, `acceptance`, `repair`, `clean`,
-`support-bundle`, `cleanup-workspace`, and `uninstall`.
+`support-bundle`, `cleanup-workspace`, `uninstall`, `workspace-manifest`, and
+`update-vendors`.
 
 ## Enterprise Options
 
@@ -205,12 +212,27 @@ The installer records enterprise setup choices in the plan and evidence:
 - `--release-channel=development|stable|explicit`
 - `--resume`, `--retry-failed`, and `--from-step=<step-code>`
 - `--alternate-ports`
+- `--output=/path/setup-plan.json`
+- `--fix` with `--action=doctor --yes` for safe installer metadata repair
+- `--explain` with logs and beginner reports
+- `--module-preset=capability|data-pack|integration-adapter|api-facade|workflow-extension`
+- `--site-preset=apparel|electronics|telco|company|commerce`
 - `--policy-pack=/path`, `--offline-cache=/path`, `--proxy=...`, and
   `--npm-registry=...`
 
 `stable` maps to `master` when `--release` is not supplied. Explicit
 `--release=<branch-or-tag>` always wins. The npm package identity and bootstrap
 commands remain review-only until a release owner approves npm publication.
+
+Maintainers can validate the GitHub bootstrap path without changing npm package
+identity:
+
+```bash
+npm run smoke:remote -- --workspace=/tmp/nodics-remote-smoke
+```
+
+That script runs `npx github:Nodics/nodics.installer` for `version`,
+`self-check`, `plan`, and `preflight`.
 
 ## Beginner Journey
 

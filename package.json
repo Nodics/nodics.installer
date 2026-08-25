@@ -28,6 +28,7 @@
     "docs/",
     "llm/",
     "nodics.js",
+    "scripts/",
     "src/"
   ],
   "publishConfig": {
@@ -41,6 +42,7 @@
   "scripts": {
     "start": "node bin/nodics-installer.js",
     "test": "node --test test/installer.contract.test.js",
+    "smoke:remote": "node scripts/remote-npx-smoke.js",
     "pack:check": "npm pack --dry-run",
     "publish:check": "npm test && npm run pack:check"
   },

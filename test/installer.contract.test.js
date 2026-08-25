@@ -30,7 +30,9 @@ test('repository keeps the standard non-runtime Nodics module shape', async () =
     assert.equal(packageJson.repository.url, 'git+https://github.com/Nodics/nodics.installer.git');
     assert.equal(packageJson.publishConfig.access, 'public');
     assert.equal(packageJson.scripts['publish:check'], 'npm test && npm run pack:check');
+    assert.equal(packageJson.scripts['smoke:remote'], 'node scripts/remote-npx-smoke.js');
     assert(packageJson.files.includes('docs/'));
+    assert(packageJson.files.includes('scripts/'));
     assert.equal(packageJson.nodics.kind, 'tooling');
     assert.equal(packageJson.nodics.displayName, 'Nodics Installer');
     assert.equal(packageJson.nodics.runtimeModule, false);
@@ -113,6 +115,11 @@ test('creates an executable beginner local setup plan', () => {
     assert(plan.safetyRules.some(rule => rule.includes('nodics.ai') && rule.includes('nodics.axis')));
     assert.equal(plan.supportMatrix.node.recommended, '22.x or 24.x');
     assert.equal(plan.jsonContracts.preflight, 1);
+    assert.equal(plan.jsonContracts.health, 1);
+    assert.equal(plan.workspaceConflictReport.status, 'passed');
+    assert(plan.workspaceManifestPath.endsWith('.nodics-workspace.json'));
+    assert.equal(plan.osDependencyGuidance.macos.packageManager, 'Homebrew');
+    assert.match(plan.enterprisePolicy.remoteNpxSmokeCommand, /smoke:remote/);
     assert(plan.serviceDependencyGraph.some(entry => entry.service === 'axis' && entry.dependsOn.includes('platform')));
     assert(plan.portPlan.some(entry => entry.code === 'platform' && entry.port === 4300));
     assert(plan.runtimeHealthPlan.some(entry => entry.code === 'axis'));
@@ -394,6 +401,7 @@ test('execute writes resumable evidence with injected stages', async () => {
         ...installer,
         prepareRepositories: () => [{ repository: 'nodics.ai', action: 'reused' }],
         rebrandGeneratedApplications: () => ['evidence-app.startio/.nodics-installer-identity.json'],
+        writeWorkspaceManifest: () => ({ manifestPath: path.join(workspace, '.nodics-workspace.json') }),
         installFrameworkDependencies: () => ({ status: 'passed', command: 'npm ci' }),
         configureApplicationProject: () => ({ status: 'passed', command: 'npm run configure:framework' }),
         installDependencies: () => [{ status: 'passed', command: 'npm ci' }],
@@ -408,6 +416,7 @@ test('execute writes resumable evidence with injected stages', async () => {
     assert.deepEqual(evidence.steps.map(step => step.code), [
         'download',
         'rebrand',
+        'workspace-manifest',
         'vendor-boundary',
         'install-framework',
         'configure',
@@ -889,6 +898,45 @@ test('doctor returns prerequisite fix guidance', async () => {
     assert(installer.renderDoctor(result).includes('Nodics Installer doctor'));
 });
 
+test('doctor fix writes only installer metadata', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-doctor-fix-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--action=doctor',
+        '--fix',
+        '--yes'
+    ]);
+    const plan = installer.createSetupPlan(options);
+    const result = installer.safeDoctorFixes(plan, options);
+    assert.equal(result.operation, 'local-doctor-fix');
+    assert(result.fixed.includes('.nodics-workspace.json'));
+    assert(fs.existsSync(path.join(workspace, '.nodics-workspace.json')));
+    assert.match(result.rule, /never installs dependencies/);
+});
+
+test('plan output writes structured dry-run report', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-output-'));
+    const outputPath = path.join(workspace, 'setup-plan.json');
+    const originalLog = console.log;
+    try {
+        console.log = () => {};
+        await installer.run([
+            '--workspace=' + path.join(workspace, 'root'),
+            '--application-name=Acme',
+            '--project-name=acme.startio',
+            '--output=' + outputPath,
+            '--json'
+        ], { input: { isTTY: false }, output: { isTTY: false } });
+    } finally {
+        console.log = originalLog;
+    }
+    const report = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+    assert.equal(report.operation, 'local-setup-plan');
+    assert.equal(report.beginnerChoices.application.projectName, 'acme.startio');
+});
+
 test('version action exposes supported actions without requiring workspace validation', async () => {
     const result = installer.versionInfo();
     assert.equal(result.operation, 'local-installer-version');
@@ -905,10 +953,18 @@ test('version action exposes supported actions without requiring workspace valid
     assert(result.actions.includes('self-check'));
     assert(result.actions.includes('cleanup-workspace'));
     assert(result.actions.includes('uninstall'));
+    assert(result.actions.includes('workspace-manifest'));
+    assert(result.actions.includes('update-vendors'));
+    assert(result.actions.includes('diff-review'));
+    assert(result.actions.includes('data-readiness'));
+    assert(result.actions.includes('publishing-check'));
+    assert(result.actions.includes('health'));
     assert(result.actions.includes('troubleshooting'));
     assert(result.mutatingActions.includes('clean'));
     assert(result.mutatingActions.includes('support-bundle'));
     assert(result.mutatingActions.includes('cleanup-workspace'));
+    assert(result.mutatingActions.includes('workspace-manifest'));
+    assert(result.mutatingActions.includes('update-vendors'));
     assert(result.mutatingActions.includes('add-site'));
     assert.match(installer.renderVersion(result), /Mutating actions require --yes/);
 });
@@ -1047,6 +1103,22 @@ test('logs action groups beginner failure signals', () => {
     assert(signals.some(signal => signal.code === 'port-conflict'));
     assert(signals.some(signal => signal.code === 'dependency-not-listening'));
     assert(signals.some(signal => signal.code === 'runtime-error'));
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-logs-explain-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--explain'
+    ]);
+    const stateDirectory = path.join(options.application.projectPath, 'envs', 'acmeLocal', 'generated', 'local-topology');
+    fs.mkdirSync(stateDirectory, { recursive: true });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
+        topology: { environment: 'acmeLocal', stateDirectory: 'envs/acmeLocal/generated/local-topology' }
+    });
+    fs.writeFileSync(path.join(stateDirectory, 'platform.log'), 'Error: listen EADDRINUSE: address already in use\n');
+    const logs = installer.logsStatus(options);
+    assert.match(logs.explain.summary, /port-conflict/);
+    assert.match(installer.renderLogs(logs), /Explanation:/);
 });
 
 test('clean removes generated runtime directories only when topology is stopped', () => {
@@ -1146,8 +1218,12 @@ test('inventory upgrade-check support-bundle and cleanup use generated metadata 
     const upgrade = service.upgradeCheck(plan, options);
     const support = service.supportBundle(plan, options);
     assert(fs.existsSync(path.join(support.bundleRoot, 'support.json')));
+    assert(fs.existsSync(path.join(support.bundleRoot, 'manifest.json')));
     assert.doesNotMatch(fs.readFileSync(path.join(support.bundleRoot, 'support.json'), 'utf8'),
         new RegExp(installer.escapeRegExp(os.homedir())));
+    const supportManifest = installer.readJsonFile(path.join(support.bundleRoot, 'manifest.json'));
+    assert.equal(supportManifest.algorithm, 'sha256');
+    assert(supportManifest.files.some(file => file.path === 'support.json'));
     const cleanup = service.cleanupWorkspace(plan, options);
 
     assert.equal(inventory.operation, 'local-workspace-inventory');
@@ -1160,6 +1236,79 @@ test('inventory upgrade-check support-bundle and cleanup use generated metadata 
     assert(cleanup.protectedRoots.includes('nodics.axis'));
     assert(fs.existsSync(options.application.axisPath));
     assert(!fs.existsSync(options.application.projectPath));
+});
+
+test('workspace manifest diff data publishing health and vendor update actions are bounded', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nodics-installer-actions-'));
+    const options = installer.parseOptions([
+        '--workspace=' + workspace,
+        '--application-name=Acme',
+        '--project-name=acme.startio',
+        '--company-site-name=acme.web',
+        '--commerce-site-name=acme.apparel',
+        '--accelerator=apparel',
+        '--apps=axis'
+    ]);
+    const plan = installer.createSetupPlan(options);
+    [options.application.projectPath, options.application.companySitePath, options.application.commerceSitePath,
+        options.application.axisPath, path.join(workspace, 'nodics.ai')].forEach(root => {
+        fs.mkdirSync(root, { recursive: true });
+    });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'nodics.project.json'), {
+        projectCode: 'acme.startio',
+        topology: { environment: 'acmeLocal', stateDirectory: 'envs/acmeLocal/generated/local-topology' },
+        acceptance: { localBootstrap: installer.localBootstrapAcceptanceCapabilities(options) }
+    });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'data', 'manifest.json'), { packages: [] });
+    installer.writeJsonFile(path.join(options.application.projectPath, 'modules', 'mediaPack', 'data', 'manifest.json'), {});
+    installer.writeInstallerIdentity(options.application.projectPath, { kind: 'customer-project', applicationName: 'Acme' });
+
+    const calls = [];
+    const service = {
+        ...installer,
+        isGitCheckout: () => true,
+        assertCleanCheckout: () => {},
+        switchRelease: () => {},
+        repositoryEvidence: repository => ({ repository: repository.name, branch: repository.release, commit: 'abc123' }),
+        readTopologyStatus: () => ({
+            status: {
+                supervisor: 'RUNNING',
+                runtimes: [
+                    { code: 'wcmsStaged', ready: true, ownership: 'THIS_SUPERVISOR' },
+                    { code: 'wcmsOnline', ready: true, ownership: 'THIS_SUPERVISOR' },
+                    { code: 'process', ready: true, ownership: 'THIS_SUPERVISOR' }
+                ]
+            }
+        }),
+        runCommand: (command, args, commandOptions) => {
+            calls.push([command, ...(args || [])].join(' '));
+            if (command === 'curl') {
+                return { status: 'passed', stdout: '200', stderr: '' };
+            }
+            return { status: 'passed', stdout: '', stderr: '', cwd: commandOptions && commandOptions.cwd };
+        }
+    };
+
+    const manifest = service.writeWorkspaceManifest(plan, options);
+    const diff = service.diffReview(plan, options);
+    const data = service.dataReadinessStatus(plan, options);
+    const publishing = service.publishingCheck(plan, options);
+    const health = service.healthCheck(plan, options);
+    const update = service.updateVendors(plan, options);
+
+    assert.equal(manifest.operation, 'local-workspace-manifest');
+    assert(fs.existsSync(path.join(workspace, '.nodics-workspace.json')));
+    assert.equal(diff.operation, 'local-diff-review');
+    assert.equal(data.operation, 'local-data-readiness');
+    assert.equal(data.ok, true);
+    assert.equal(publishing.operation, 'local-publishing-check');
+    assert.equal(publishing.ok, true);
+    assert.equal(health.operation, 'local-runtime-health');
+    assert.equal(health.ok, true);
+    assert.equal(update.operation, 'local-update-vendors');
+    assert.deepEqual(update.updated.map(repository => repository.repository).sort(), ['nodics.ai', 'nodics.axis']);
+    assert(calls.some(command => command.includes('git fetch origin --prune')));
+    assert(!calls.some(command => command.includes('acme.startio') && command.includes('git pull')));
 });
 
 test('expansion allows generated customer changes but rejects vendor repository changes', () => {
@@ -1217,7 +1366,8 @@ test('add-environment copies one requested environment and writes expansion evid
     assert.deepEqual(descriptor.expansions.environments[0], {
         name: 'acmeQa',
         source: 'acmeLocal',
-        mode: 'node'
+        mode: 'node',
+        environmentProfile: 'local-dev'
     });
     const evidence = installer.readEvidence(result.evidencePath);
     assert.equal(evidence.entries[0].action, 'add-environment');
@@ -1254,6 +1404,7 @@ test('add-module creates a module-shaped customer backend module', () => {
     assert.equal(packageJson.nodics.loadableByNodicsModuleLoader, true);
     assert.equal(packageJson.nodics.displayName, 'Acme Loyalty');
     assert.deepEqual(packageJson.nodics.runtime, { router: false, publish: false, web: false });
+    assert.equal(packageJson.nodics.presetSummary, 'General customer capability module.');
     const descriptor = installer.readJsonFile(path.join(options.application.projectPath, 'nodics.project.json'));
     assert.deepEqual(descriptor.expansions.modules[0], {
         name: 'acmeLoyalty',
@@ -1303,6 +1454,7 @@ test('add-site creates one requested customer site from template and records top
     assert.equal(result.operation, 'local-expansion-add-site');
     assert.equal(result.siteName, 'acme.electronics');
     assert.equal(result.siteType, 'commerce');
+    assert.equal(result.sitePreset, 'electronics');
     assert.equal(result.frontendPort, 3200);
     assert.equal(result.install.status, 'passed');
     const sitePath = path.join(workspace, 'acme.electronics');
@@ -1317,6 +1469,7 @@ test('add-site creates one requested customer site from template and records top
     assert.deepEqual(descriptor.expansions.sites[0], {
         name: 'acme.electronics',
         type: 'commerce',
+        preset: 'electronics',
         accelerator: 'electronics'
     });
     assert.match(fs.readFileSync(path.join(options.application.projectPath, '.env'), 'utf8'),
@@ -1372,6 +1525,9 @@ test('release workflow validates installer package', () => {
     const workflow = fs.readFileSync(workflowPath, 'utf8');
     assert.match(workflow, /development/);
     assert.match(workflow, /npm test/);
+    assert.match(workflow, /node --check src\/installer\.js/);
     assert.match(workflow, /npm run publish:check/);
     assert.match(workflow, /npm pack --dry-run/);
+    assert.match(workflow, /actions\/upload-artifact@v4/);
+    assert(fs.existsSync(path.join(repoRoot, 'scripts', 'remote-npx-smoke.js')));
 });

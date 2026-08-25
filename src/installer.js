@@ -12,6 +12,7 @@
 'use strict';
 
 const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
@@ -30,11 +31,13 @@ const VALID_ACTIONS = new Set([
     'plan', 'questionnaire', 'preflight', 'doctor', 'execute', 'status', 'start', 'stop', 'restart', 'logs',
     'initialize', 'acceptance', 'repair', 'clean', 'add-environment', 'add-module', 'add-site',
     'inventory', 'support-bundle', 'upgrade-check', 'self-check', 'cleanup-workspace',
-    'uninstall', 'troubleshooting', 'version'
+    'uninstall', 'update-vendors', 'diff-review', 'data-readiness', 'publishing-check', 'health',
+    'workspace-manifest', 'troubleshooting', 'version'
 ]);
 const MUTATING_ACTIONS = new Set([
     'execute', 'start', 'stop', 'restart', 'initialize', 'acceptance', 'repair', 'clean',
-    'add-environment', 'add-module', 'add-site', 'support-bundle', 'cleanup-workspace', 'uninstall'
+    'add-environment', 'add-module', 'add-site', 'support-bundle', 'cleanup-workspace', 'uninstall',
+    'update-vendors', 'workspace-manifest'
 ]);
 const VALID_EXECUTION_LEVELS = new Set(['download', 'install', 'preflight', 'start', 'initialize', 'acceptance']);
 const VALID_CLONE_MODES = new Set(['https', 'ssh', 'existing']);
@@ -43,7 +46,36 @@ const VALID_ACCEPTANCE_PROFILES = new Set(['smoke', 'standard', 'full']);
 const VALID_ENVIRONMENT_PROFILES = new Set(['local-dev', 'local-demo', 'local-qa', 'docker-local']);
 const VALID_RELEASE_CHANNELS = new Set(['development', 'stable', 'explicit']);
 const VALID_MODULE_PRESETS = new Set(['capability', 'data-pack', 'integration-adapter', 'api-facade', 'workflow-extension']);
+const VALID_SITE_PRESETS = new Set(['company', 'commerce', 'apparel', 'electronics', 'telco']);
 const VENDOR_OWNED_REPOSITORIES = Object.freeze(['nodics.ai', 'nodics.axis']);
+
+const MODULE_PRESET_DETAILS = Object.freeze({
+    capability: Object.freeze({
+        owns: Object.freeze(['configuration', 'llm']),
+        runtime: Object.freeze({ router: false, publish: false, web: false }),
+        summary: 'General customer capability module.'
+    }),
+    'data-pack': Object.freeze({
+        owns: Object.freeze(['data', 'manifest', 'llm']),
+        runtime: Object.freeze({ router: false, publish: true, web: false }),
+        summary: 'Customer data-pack module with manifest ownership.'
+    }),
+    'integration-adapter': Object.freeze({
+        owns: Object.freeze(['integration', 'service-adapter', 'llm']),
+        runtime: Object.freeze({ router: false, publish: false, web: false }),
+        summary: 'Customer integration adapter module.'
+    }),
+    'api-facade': Object.freeze({
+        owns: Object.freeze(['api-facade', 'router-contract', 'llm']),
+        runtime: Object.freeze({ router: true, publish: false, web: false }),
+        summary: 'Customer API facade module.'
+    }),
+    'workflow-extension': Object.freeze({
+        owns: Object.freeze(['workflow', 'process-extension', 'llm']),
+        runtime: Object.freeze({ router: false, publish: false, web: false }),
+        summary: 'Customer workflow extension module.'
+    })
+});
 
 const SUPPORT_MATRIX = Object.freeze({
     node: Object.freeze({ minimumMajor: 22, maximumMajor: 24, recommended: '22.x or 24.x' }),
@@ -66,7 +98,13 @@ const JSON_RESULT_CONTRACTS = Object.freeze({
     inventory: 1,
     supportBundle: 1,
     upgradeCheck: 1,
-    selfCheck: 1
+    selfCheck: 1,
+    updateVendors: 1,
+    diffReview: 1,
+    dataReadiness: 1,
+    publishingCheck: 1,
+    health: 1,
+    workspaceManifest: 1
 });
 
 const DEFAULT_REPOSITORIES = Object.freeze({
@@ -363,6 +401,14 @@ const installer = {
             '                             Export sanitized setup evidence and log excerpts.',
             '  --action=upgrade-check    Compare generated metadata with current installer rules.',
             '  --action=self-check       Validate installer package and local command readiness.',
+            '  --action=workspace-manifest --yes',
+            '                             Write .nodics-workspace.json for the selected workspace.',
+            '  --action=update-vendors --yes',
+            '                             Safely fetch and fast-forward nodics.ai and nodics.axis only.',
+            '  --action=diff-review      Show generated/customer/vendor diff ownership review.',
+            '  --action=data-readiness   Inspect starter data manifest and seed readiness.',
+            '  --action=publishing-check Inspect staged/online/process/media publishing readiness.',
+            '  --action=health           Check expected local runtime URLs.',
             '  --action=add-environment --yes',
             '                             Add one explicit environment after first setup.',
             '  --action=add-module --yes Add one customer backend module after first setup.',
@@ -399,6 +445,9 @@ const installer = {
             '                                     Resume controls for failed setup evidence.',
             '  --alternate-ports                  Preview alternate local port guidance.',
             '  --support-bundle=/path/bundle      Custom sanitized support bundle path.',
+            '  --output=/path/setup-plan.json     Write structured result JSON to a file.',
+            '  --fix                              Allow doctor safe local metadata fixes with --yes.',
+            '  --explain                          Add beginner explanations to logs and reports.',
             '  --proxy=http://host:port          Record enterprise proxy requirement.',
             '  --npm-registry=https://registry   Use npm registry while installing.',
             '  --offline-cache=/path             Record offline cache location.',
@@ -412,6 +461,8 @@ const installer = {
             '                                     Default: capability.',
             '  --site-name=acme.electronics      Target site for add-site.',
             '  --site-type=commerce|company      Site template type for add-site. Default: commerce.',
+            '  --site-preset=apparel|electronics|telco|company|commerce',
+            '                                     Default follows --site-type and --accelerator.',
             '  --json                            Print structured JSON.',
             '  --help                            Show this help.',
             '',
@@ -491,6 +542,9 @@ const installer = {
             fromStep: this.readOption(args, '--from-step', ''),
             alternatePorts: this.hasFlag(args, '--alternate-ports'),
             supportBundlePath: this.readOption(args, '--support-bundle', ''),
+            outputPath: this.readOption(args, '--output', ''),
+            fix: this.hasFlag(args, '--fix'),
+            explain: this.hasFlag(args, '--explain'),
             start: this.hasFlag(args, '--start') || action === 'start',
             initialize: this.hasFlag(args, '--initialize') || action === 'initialize',
             acceptance: this.hasFlag(args, '--acceptance') || action === 'acceptance',
@@ -511,8 +565,13 @@ const installer = {
             moduleName: this.toNodicsIdentifier(rawModuleName),
             modulePreset,
             siteName: rawSiteName ? this.toApplicationSlug(rawSiteName) : '',
-            siteType: this.readOption(args, '--site-type', 'commerce').toLowerCase()
+            siteType: this.readOption(args, '--site-type', 'commerce').toLowerCase(),
+            sitePreset: this.readOption(args, '--site-preset', '').toLowerCase()
         };
+        if (!options.sitePreset) {
+            options.sitePreset = options.siteType === 'company' ? 'company' :
+                (options.accelerator === 'common' ? 'commerce' : options.accelerator);
+        }
         options.application = this.createApplicationIdentity(options);
         return options;
     },
@@ -668,7 +727,7 @@ const installer = {
             errors.push('Unknown accelerator `' + options.accelerator + '`. Use common, apparel, electronics, telco, or combined.');
         }
         if (!VALID_ACTIONS.has(options.action)) {
-            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, cleanup-workspace, uninstall, inventory, support-bundle, upgrade-check, self-check, add-environment, add-module, add-site, troubleshooting, or version.');
+            errors.push('Unknown action `' + options.action + '`. Use plan, questionnaire, preflight, doctor, execute, status, start, stop, restart, logs, initialize, acceptance, repair, clean, cleanup-workspace, uninstall, update-vendors, inventory, workspace-manifest, support-bundle, upgrade-check, diff-review, data-readiness, publishing-check, health, self-check, add-environment, add-module, add-site, troubleshooting, or version.');
         }
         if (!VALID_EXECUTION_LEVELS.has(options.executionLevel)) {
             errors.push('Unknown execution level `' + options.executionLevel + '`.');
@@ -688,11 +747,14 @@ const installer = {
         if (options.releaseChannel === 'explicit' && !options.release) {
             errors.push('Explicit release channel requires --release=<branch-or-tag>.');
         }
-        if (options.fromStep && !['download', 'rebrand', 'vendor-boundary', 'install-framework', 'configure', 'install', 'preflight', 'topology-preflight', 'start', 'initialize', 'acceptance'].includes(options.fromStep)) {
+        if (options.fromStep && !['download', 'rebrand', 'workspace-manifest', 'vendor-boundary', 'install-framework', 'configure', 'install', 'preflight', 'topology-preflight', 'start', 'initialize', 'acceptance'].includes(options.fromStep)) {
             errors.push('Unknown --from-step `' + options.fromStep + '`. Use a setup evidence step code.');
         }
         if (MUTATING_ACTIONS.has(options.action) && !options.yes) {
             errors.push('Action `' + options.action + '` requires --yes so the installer cannot mutate the machine by accident.');
+        }
+        if (options.action === 'doctor' && options.fix && !options.yes) {
+            errors.push('doctor --fix requires --yes because it may refresh local installer metadata.');
         }
         if (options.journey === 'project') {
             errors.push('The custom project journey is documented but deferred until the reference local setup journey is stable.');
@@ -716,6 +778,9 @@ const installer = {
             }
             if (!VALID_SITE_TYPES.has(options.siteType)) {
                 errors.push('add-site requires --site-type=commerce or --site-type=company.');
+            }
+            if (!VALID_SITE_PRESETS.has(options.sitePreset)) {
+                errors.push('add-site requires --site-preset=apparel, electronics, telco, company, or commerce.');
             }
             if (this.isVendorOwnedName(options.rawSiteName)) {
                 errors.push('add-site cannot target vendor-owned repositories such as nodics.ai or nodics.axis.');
@@ -1063,6 +1128,162 @@ const installer = {
         };
     },
 
+    osDependencyGuidance: function () {
+        return {
+            macos: {
+                packageManager: 'Homebrew',
+                commands: [
+                    'brew install node git redis',
+                    'brew tap mongodb/brew && brew install mongodb-community',
+                    'brew install elasticsearch'
+                ],
+                note: 'Start services with brew services or run them in separate terminal windows before full local start.'
+            },
+            linux: {
+                packageManager: 'apt, dnf, yum, or distro package manager',
+                commands: [
+                    'Install Node.js 22 or 24 from NodeSource, nvm, or enterprise package mirror.',
+                    'Install git, Redis, MongoDB, and Elasticsearch from approved repositories.'
+                ],
+                note: 'Use the enterprise distribution guide when corporate mirrors or custom CA certificates are required.'
+            },
+            windows: {
+                packageManager: 'winget, Chocolatey, or WSL',
+                commands: [
+                    'winget install OpenJS.NodeJS Git.Git',
+                    'Use Docker Desktop or WSL for MongoDB, Redis, and Elasticsearch.'
+                ],
+                note: 'WSL is recommended for a Unix-like local developer experience.'
+            }
+        };
+    },
+
+    workspaceConflictReport: function (plan) {
+        const conflicts = plan.repositories
+            .filter(repository => fs.existsSync(repository.targetPath))
+            .map(repository => {
+                const entry = {
+                    repository: repository.name,
+                    path: repository.targetPath,
+                    expectedRelease: repository.release,
+                    vendorOwned: VENDOR_OWNED_REPOSITORIES.includes(repository.name)
+                };
+                if (!this.isGitCheckout(repository.targetPath)) {
+                    return {
+                        ...entry,
+                        status: 'failed',
+                        reason: 'path-exists-not-git',
+                        fix: 'Move the folder or choose another workspace before setup.'
+                    };
+                }
+                const status = this.runCommand('git', ['status', '--short'], {
+                    cwd: repository.targetPath,
+                    allowFailure: true
+                });
+                const branch = this.runCommand('git', ['branch', '--show-current'], {
+                    cwd: repository.targetPath,
+                    allowFailure: true
+                });
+                const remote = this.runCommand('git', ['remote', 'get-url', 'origin'], {
+                    cwd: repository.targetPath,
+                    allowFailure: true
+                });
+                const dirty = Boolean(status.stdout.trim());
+                const wrongBranch = branch.stdout.trim() && branch.stdout.trim() !== repository.release;
+                return {
+                    ...entry,
+                    status: dirty || wrongBranch || remote.status !== 'passed' ? 'warning' : 'passed',
+                    branch: branch.stdout.trim() || undefined,
+                    dirty,
+                    remote: remote.status === 'passed' ? remote.stdout.trim() : undefined,
+                    reason: dirty ? 'dirty-repository' : (wrongBranch ? 'different-branch' :
+                        (remote.status !== 'passed' ? 'missing-origin' : undefined)),
+                    fix: dirty ? 'Commit, stash, or move local edits before reuse.' :
+                        (wrongBranch ? 'Switch or approve the requested release before setup.' :
+                            (remote.status !== 'passed' ? 'Add an origin remote or reclone the repository.' : undefined))
+                };
+            });
+        return {
+            status: conflicts.some(conflict => conflict.status === 'failed') ? 'failed' :
+                (conflicts.some(conflict => conflict.status === 'warning') ? 'warning' : 'passed'),
+            conflicts
+        };
+    },
+
+    workspaceManifest: function (plan, options) {
+        const inventory = this.workspaceInventory(options);
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.workspaceManifest,
+            operation: 'local-workspace-manifest',
+            ok: true,
+            generatedAt: new Date().toISOString(),
+            workspace: options.workspace,
+            installer: plan.installer,
+            application: options.application,
+            repositories: plan.repositories.map(repository => ({
+                code: repository.code,
+                name: repository.name,
+                path: repository.targetPath,
+                release: repository.release,
+                vendorOwned: VENDOR_OWNED_REPOSITORIES.includes(repository.name)
+            })),
+            inventory: inventory.items,
+            ownership: this.customerCustomizationMap(options),
+            protectedVendorRoots: VENDOR_OWNED_REPOSITORIES
+        };
+    },
+
+    writeWorkspaceManifest: function (plan, options) {
+        const manifest = this.workspaceManifest(plan, options);
+        const manifestPath = path.join(options.workspace, '.nodics-workspace.json');
+        this.writeJsonFile(manifestPath, manifest);
+        return {
+            ...manifest,
+            manifestPath
+        };
+    },
+
+    compatibilityMatrix: function (plan, options, findings) {
+        const repositories = plan.repositories.map(repository => this.repositoryStatus(repository));
+        return {
+            installer: {
+                version: VERSION,
+                status: 'current'
+            },
+            framework: repositories.find(repository => repository.name === 'nodics.ai') || null,
+            axis: repositories.find(repository => repository.name === 'nodics.axis') || null,
+            customerProject: repositories.find(repository => repository.name === options.application.projectName) || null,
+            lock: path.join(options.application.projectPath, '.nodics-installer-lock.json'),
+            findings: findings || []
+        };
+    },
+
+    diffReview: function (plan, options) {
+        const roots = plan.repositories.filter(repository => fs.existsSync(repository.targetPath));
+        const repositories = roots.map(repository => {
+            const status = this.isGitCheckout(repository.targetPath) ?
+                this.runCommand('git', ['status', '--short'], { cwd: repository.targetPath, allowFailure: true }) :
+                { stdout: '', status: 'failed' };
+            return {
+                name: repository.name,
+                path: repository.targetPath,
+                vendorOwned: VENDOR_OWNED_REPOSITORIES.includes(repository.name),
+                generated: fs.existsSync(path.join(repository.targetPath, '.nodics-installer-identity.json')),
+                changedFiles: status.stdout.trim() ? status.stdout.trim().split(/\r?\n/) : [],
+                status: status.status === 'passed' ? 'passed' : 'warning',
+                rule: VENDOR_OWNED_REPOSITORIES.includes(repository.name) ?
+                    'Vendor-owned changes require a Nodics source change plan.' :
+                    'Generated/customer-owned changes can be reviewed and committed by the customer when intended.'
+            };
+        });
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.diffReview,
+            operation: 'local-diff-review',
+            ok: repositories.every(repository => !repository.vendorOwned || repository.changedFiles.length === 0),
+            repositories
+        };
+    },
+
     createSetupPlan: function (options) {
         const validation = this.validateOptions(options);
         if (!validation.valid) {
@@ -1110,6 +1331,9 @@ const installer = {
             },
             supportMatrix: SUPPORT_MATRIX,
             jsonContracts: JSON_RESULT_CONTRACTS,
+            osDependencyGuidance: this.osDependencyGuidance(),
+            workspaceConflictReport: this.workspaceConflictReport({ repositories }),
+            workspaceManifestPath: path.join(options.workspace, '.nodics-workspace.json'),
             serviceDependencyGraph: this.serviceDependencyGraph(options),
             portPlan: this.portPlan(options),
             runtimeHealthPlan: this.runtimeHealthPlan({ portPlan: this.portPlan(options) }),
@@ -1129,6 +1353,7 @@ const installer = {
                 offlineCache: options.offlineCache || undefined,
                 proxy: options.proxy || undefined,
                 npmRegistry: options.npmRegistry || undefined,
+                remoteNpxSmokeCommand: 'npm run smoke:remote -- --workspace=/tmp/nodics-remote-smoke',
                 policyPack: options.policyPack || undefined,
                 privacy: 'Console output, evidence, and support bundles must redact tokens, bearer headers, passwords, and secrets.',
                 telemetry: 'Installer evidence records local timings and failure categories only; it does not send telemetry.'
@@ -1184,6 +1409,7 @@ const installer = {
                 'Run local preflight before starting services.',
                 'Start the selected backend and frontend topology when requested by execution level.',
                 'Run guided initialization when sample or accelerator data is selected.',
+                'Write .nodics-workspace.json so support, upgrades, and AI tools can identify generated roots.',
                 'Write setup evidence without secret values.'
             ],
             commands: options.mode === 'docker' ? this.dockerCommands(options) : this.nodeCommands(options),
@@ -1361,6 +1587,21 @@ const installer = {
             socket.once('error', () => resolve(false));
             socket.connect(port, '127.0.0.1');
         });
+    },
+
+    portOwner: function (port) {
+        const result = this.runCommand('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN'], {
+            cwd: process.cwd(),
+            allowFailure: true
+        });
+        if (result.status !== 'passed' || !result.stdout.trim()) {
+            return null;
+        }
+        const lines = result.stdout.trim().split(/\r?\n/);
+        return {
+            command: 'lsof -nP -iTCP:' + port + ' -sTCP:LISTEN',
+            summary: lines.slice(0, 4).join('\n')
+        };
     },
 
     parseMajorVersion: function (value) {
@@ -1692,6 +1933,14 @@ const installer = {
         });
         checks.push(...this.repositoryAccessChecks(plan, options));
         checks.push(...this.existingRepositoryHealthChecks(plan));
+        checks.push(...this.workspaceConflictReport(plan).conflicts.map(conflict => ({
+            code: 'workspace-conflict-' + conflict.repository,
+            required: conflict.status === 'failed',
+            status: conflict.status,
+            repository: conflict.repository,
+            reason: conflict.reason,
+            fix: conflict.fix
+        })));
         checks.push(...this.frontendEnvironmentChecks(options));
         checks.push(this.policyPackCheck(options));
         const ports = Object.values(plan.expectedUrls)
@@ -1700,7 +1949,15 @@ const installer = {
             .filter(Boolean);
         for (const port of Array.from(new Set(ports))) {
             const busy = await this.portListening(port);
-            checks.push({ code: 'port-' + port, required: true, status: busy ? 'failed' : 'passed', busy });
+            const owner = busy ? this.portOwner(port) : null;
+            checks.push({
+                code: 'port-' + port,
+                required: true,
+                status: busy ? 'failed' : 'passed',
+                busy,
+                owner,
+                fix: busy ? 'Stop the listed process or use --alternate-ports to review a shifted port plan.' : undefined
+            });
         }
         return {
             contractVersion: JSON_RESULT_CONTRACTS.preflight,
@@ -1760,7 +2017,7 @@ const installer = {
         }
         if (options.fromStep) {
             const order = [
-                'download', 'rebrand', 'vendor-boundary', 'install-framework', 'configure', 'install',
+                'download', 'rebrand', 'workspace-manifest', 'vendor-boundary', 'install-framework', 'configure', 'install',
                 'preflight', 'topology-preflight', 'start', 'initialize', 'acceptance'
             ];
             const startIndex = order.indexOf(options.fromStep);
@@ -2921,12 +3178,14 @@ const installer = {
         changed.push(...this.updateProjectExpansionMetadata(options, 'environments', {
             name: options.environmentName,
             source: sourceEnvironment,
-            mode: options.mode
+            mode: options.mode,
+            environmentProfile: options.environmentProfile
         }));
         const evidencePath = this.writeExpansionEvidence(options, {
             action: 'add-environment',
             environmentName: options.environmentName,
             fromEnvironment: sourceEnvironment,
+            environmentProfile: options.environmentProfile,
             changed: Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath))
         });
         return {
@@ -2934,6 +3193,7 @@ const installer = {
             ok: true,
             environmentName: options.environmentName,
             fromEnvironment: sourceEnvironment,
+            environmentProfile: options.environmentProfile,
             changed: Array.from(new Set(changed)).map(filePath => path.relative(options.workspace, filePath)),
             evidencePath
         };
@@ -2946,6 +3206,7 @@ const installer = {
         if (fs.existsSync(modulePath)) {
             throw new Error('Module already exists: ' + modulePath);
         }
+        const preset = MODULE_PRESET_DETAILS[options.modulePreset] || MODULE_PRESET_DETAILS.capability;
         fs.mkdirSync(path.join(modulePath, 'config'), { recursive: true });
         fs.mkdirSync(path.join(modulePath, 'src', 'service'), { recursive: true });
         this.writeJsonFile(path.join(modulePath, 'package.json'), {
@@ -2971,15 +3232,9 @@ const installer = {
                 owner: options.application.projectName,
                 runtimeModule: true,
                 loadableByNodicsModuleLoader: true,
-                owns: [
-                    'configuration',
-                    'llm'
-                ],
-                runtime: {
-                    router: false,
-                    publish: false,
-                    web: false
-                },
+                owns: Array.from(preset.owns),
+                runtime: { ...preset.runtime },
+                presetSummary: preset.summary,
                 displayName: this.toDisplayTitle(options.moduleName, options.moduleName)
             }
         });
@@ -3000,6 +3255,10 @@ const installer = {
             '# ' + options.moduleName,
             '',
             'Customer module for ' + options.application.name + '.',
+            '',
+            'Preset: `' + options.modulePreset + '`.',
+            '',
+            preset.summary,
             '',
             'This module was added by `nodics.installer` after the first local setup.',
             ''
@@ -3174,6 +3433,7 @@ const installer = {
         changed.push(...this.updateProjectExpansionMetadata(options, 'sites', {
             name: options.siteName,
             type: options.siteType,
+            preset: options.sitePreset,
             accelerator: options.siteType === 'commerce' ? options.accelerator : undefined
         }));
         changed.push(this.appendProjectEnvRoot(options, targetPath));
@@ -3182,6 +3442,7 @@ const installer = {
             action: 'add-site',
             siteName: options.siteName,
             siteType: options.siteType,
+            sitePreset: options.sitePreset,
             changed: relativeChanged
         });
         return {
@@ -3189,6 +3450,7 @@ const installer = {
             ok: true,
             siteName: options.siteName,
             siteType: options.siteType,
+            sitePreset: options.sitePreset,
             sitePath: targetPath,
             frontendPort,
             install,
@@ -3355,8 +3617,70 @@ const installer = {
             'Nodics support bundle created',
             'Bundle: ' + result.bundleRoot,
             'Archive: ' + (result.archivePath || result.archiveStatus),
+            'Manifest: ' + result.manifestPath,
             'Privacy: ' + result.privacy
         ].join('\n');
+    },
+
+    renderWorkspaceManifest: function (result) {
+        return [
+            'Nodics workspace manifest written',
+            'Workspace: ' + result.workspace,
+            'Manifest: ' + result.manifestPath,
+            'Protected vendor roots: ' + result.protectedVendorRoots.join(', ')
+        ].join('\n');
+    },
+
+    renderDiffReview: function (result) {
+        const lines = ['Nodics diff review ' + (result.ok ? 'passed' : 'needs review')];
+        result.repositories.forEach(repository => {
+            lines.push('- ' + repository.name + ': ' + repository.changedFiles.length + ' changed file(s)' +
+                (repository.vendorOwned ? ' vendor-owned' : ' customer/generated'));
+            if (repository.changedFiles.length) {
+                repository.changedFiles.slice(0, 8).forEach(fileName => lines.push('  ' + fileName));
+            }
+        });
+        return lines.join('\n');
+    },
+
+    renderUpdateVendors: function (result) {
+        const lines = ['Nodics vendor update completed'];
+        result.updated.forEach(repository => lines.push('- updated ' + repository.repository + ' ' + repository.branch +
+            ' ' + repository.commit));
+        result.skipped.forEach(repository => lines.push('- skipped ' + repository.repository + ': ' + repository.reason));
+        return lines.join('\n');
+    },
+
+    renderDataReadiness: function (result) {
+        return [
+            'Nodics data readiness ' + (result.ok ? 'passed' : 'needs review'),
+            'Expected data packs: ' + result.expectedDataPacks.join(', '),
+            'Data: ' + result.data.status,
+            'Media: ' + result.media.status,
+            'Fix: ' + result.beginnerFix
+        ].join('\n');
+    },
+
+    renderPublishingCheck: function (result) {
+        return [
+            'Nodics publishing readiness ' + (result.ok ? 'passed' : 'needs review'),
+            'Command: ' + result.command,
+            'Missing runtimes: ' + (result.missingRuntimes.length ? result.missingRuntimes.join(', ') : 'none'),
+            'Data: ' + result.data.status,
+            'Media: ' + result.media.status,
+            'Fix: ' + (result.fix || 'Publishing prerequisites are ready for local acceptance.')
+        ].join('\n');
+    },
+
+    renderHealthCheck: function (result) {
+        const lines = ['Nodics runtime health ' + (result.ok ? 'passed' : 'failed')];
+        result.checks.forEach(check => {
+            lines.push('- ' + check.code + ': ' + check.status + ' ' + check.url);
+            if (check.fix) {
+                lines.push('  fix: ' + check.fix);
+            }
+        });
+        return lines.join('\n');
     },
 
     stopTopology: function (options, allowFailure) {
@@ -3377,11 +3701,13 @@ const installer = {
     repairSetup: function (plan, options) {
         const changed = this.rebrandGeneratedApplications(plan, options);
         const configure = this.configureApplicationProject(plan, options);
+        const manifest = this.writeWorkspaceManifest(plan, options);
         return {
             operation: 'local-setup-repair',
             ok: true,
             changed,
-            configure
+            configure,
+            manifestPath: manifest.manifestPath
         };
     },
 
@@ -3524,6 +3850,7 @@ const installer = {
             operation: 'local-upgrade-check',
             ok: !findings.some(finding => finding.severity === 'error'),
             lockPath,
+            compatibilityMatrix: this.compatibilityMatrix(plan, options, findings),
             findings
         };
     },
@@ -3573,6 +3900,8 @@ const installer = {
             status: this.sanitizeForSupportBundle(status),
             logs: this.sanitizeForSupportBundle(logs)
         });
+        const manifest = this.supportBundleManifest(bundleRoot);
+        this.writeJsonFile(path.join(bundleRoot, 'manifest.json'), manifest);
         const archivePath = bundleRoot + '.tar.gz';
         const tar = this.runCommand('tar', ['-czf', archivePath, '-C', path.dirname(bundleRoot), path.basename(bundleRoot)], {
             cwd: options.workspace,
@@ -3585,7 +3914,141 @@ const installer = {
             bundleRoot,
             archivePath: tar.status === 'passed' ? archivePath : undefined,
             archiveStatus: tar.status,
+            manifestPath: path.join(bundleRoot, 'manifest.json'),
             privacy: 'Secrets are redacted by the installer sanitizer before evidence and logs are included.'
+        };
+    },
+
+    hashFile: function (filePath) {
+        return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+    },
+
+    supportBundleManifest: function (bundleRoot) {
+        const files = this.collectFiles(bundleRoot, filePath => fs.statSync(filePath).isFile(), 200)
+            .filter(filePath => path.basename(filePath) !== 'manifest.json')
+            .map(filePath => ({
+                path: path.relative(bundleRoot, filePath),
+                sha256: this.hashFile(filePath),
+                sizeBytes: fs.statSync(filePath).size
+            }));
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.supportBundle,
+            operation: 'local-support-bundle-manifest',
+            algorithm: 'sha256',
+            files
+        };
+    },
+
+    safeDoctorFixes: function (plan, options) {
+        const fixed = [];
+        if (fs.existsSync(options.application.projectPath)) {
+            const lockPath = path.join(options.application.projectPath, '.nodics-installer-lock.json');
+            if (!fs.existsSync(lockPath)) {
+                fixed.push(this.writeInstallerLock(options.application.projectPath, plan, options));
+            }
+        }
+        fs.mkdirSync(options.workspace, { recursive: true });
+        const manifest = this.writeWorkspaceManifest(plan, options);
+        fixed.push(manifest.manifestPath);
+        return {
+            operation: 'local-doctor-fix',
+            ok: true,
+            fixed: Array.from(new Set(fixed)).map(filePath => path.relative(options.workspace, filePath)),
+            rule: 'doctor --fix only refreshes installer metadata and never installs dependencies or changes vendor source.'
+        };
+    },
+
+    updateVendors: function (plan, options) {
+        const updated = [];
+        const skipped = [];
+        plan.repositories
+            .filter(repository => VENDOR_OWNED_REPOSITORIES.includes(repository.name))
+            .forEach(repository => {
+                if (!fs.existsSync(repository.targetPath)) {
+                    skipped.push({
+                        repository: repository.name,
+                        reason: 'missing',
+                        fix: 'Run setup execute or clone the vendor repository before update-vendors.'
+                    });
+                    return;
+                }
+                this.assertCleanCheckout(repository.targetPath);
+                this.runCommand('git', ['fetch', 'origin', '--prune'], { cwd: repository.targetPath, allowFailure: false });
+                this.switchRelease(repository.targetPath, repository.release);
+                this.runCommand('git', ['pull', '--ff-only', 'origin', repository.release], {
+                    cwd: repository.targetPath,
+                    allowFailure: false
+                });
+                updated.push(this.repositoryEvidence(repository, 'fast-forwarded'));
+            });
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.updateVendors,
+            operation: 'local-update-vendors',
+            ok: true,
+            updated,
+            skipped,
+            protectedRule: 'Only vendor-owned nodics.ai and nodics.axis are updated; customer roots are not touched.'
+        };
+    },
+
+    dataReadinessStatus: function (plan, options) {
+        const data = this.dataSeedReadiness(options);
+        const media = this.mediaAssetReadiness(options);
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.dataReadiness,
+            operation: 'local-data-readiness',
+            ok: data.status === 'passed',
+            data,
+            media,
+            expectedDataPacks: plan.accelerator.dataPacks,
+            beginnerFix: data.fix || media.fix || 'Starter data manifests and media references are present.'
+        };
+    },
+
+    publishingCheck: function (plan, options) {
+        const readiness = this.publishingReadiness(options);
+        const data = this.dataSeedReadiness(options);
+        const media = this.mediaAssetReadiness(options);
+        const topology = fs.existsSync(options.application.projectPath) ? this.readTopologyStatus(options).status : null;
+        const runtimeCodes = topology && Array.isArray(topology.runtimes) ? topology.runtimes.map(runtime => runtime.code) : [];
+        const expected = ['wcmsStaged', 'wcmsOnline', 'process'];
+        const missingRuntimes = expected.filter(code => !runtimeCodes.includes(code));
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.publishingCheck,
+            operation: 'local-publishing-check',
+            ok: data.status === 'passed' && media.status === 'passed' && missingRuntimes.length === 0,
+            readiness,
+            data,
+            media,
+            missingRuntimes,
+            command: readiness.command,
+            fix: missingRuntimes.length ? 'Start topology before publishing acceptance.' :
+                (data.fix || media.fix || undefined)
+        };
+    },
+
+    healthCheck: function (plan, options) {
+        const checks = plan.portPlan.map(entry => {
+            const result = this.runCommand('curl', ['-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '3', entry.url], {
+                cwd: process.cwd(),
+                allowFailure: true
+            });
+            const statusCode = Number(result.stdout.trim());
+            const reachable = result.status === 'passed' && statusCode >= 100 && statusCode < 600;
+            return {
+                code: entry.code,
+                url: entry.url,
+                status: reachable ? 'passed' : 'failed',
+                statusCode: reachable ? statusCode : undefined,
+                fix: reachable ? undefined :
+                    'Start the topology or inspect logs for ' + entry.code + '.'
+            };
+        });
+        return {
+            contractVersion: JSON_RESULT_CONTRACTS.health,
+            operation: 'local-runtime-health',
+            ok: checks.every(check => check.status === 'passed'),
+            checks
         };
     },
 
@@ -3661,9 +4124,37 @@ const installer = {
             operation: 'local-setup-logs',
             ok: logs.length > 0,
             runtime: runtime || undefined,
+            explain: options.explain ? this.explainLogSignals(logs) : undefined,
             lines: options.lines,
             logDirectory: this.resolveTopologyStateDirectory(options),
             logs
+        };
+    },
+
+    explainLogSignals: function (logs) {
+        const signalCodes = Array.from(new Set(logs.flatMap(log => log.signals.map(signal => signal.code))));
+        if (!signalCodes.length) {
+            return {
+                summary: logs.length ? 'No known failure signature was found in the selected log excerpts.' :
+                    'No topology logs were found for this workspace.',
+                nextCommands: [
+                    'Run --action=status',
+                    'Run --action=doctor',
+                    'Run --action=support-bundle --yes if support handoff is needed'
+                ]
+            };
+        }
+        return {
+            summary: 'Known failure signatures were found: ' + signalCodes.join(', '),
+            nextCommands: signalCodes.includes('port-conflict') ? [
+                'Run --action=doctor',
+                'Stop the listed local process',
+                'Run --action=start --yes'
+            ] : [
+                'Run --action=doctor',
+                'Run --action=status',
+                'Run --action=support-bundle --yes if support handoff is needed'
+            ]
         };
     },
 
@@ -3701,6 +4192,10 @@ const installer = {
                 log.signals.forEach(signal => lines.push('- ' + signal.code + ': ' + signal.fix));
             }
         });
+        if (result.explain) {
+            lines.push('', 'Explanation: ' + result.explain.summary);
+            result.explain.nextCommands.forEach(command => lines.push('- ' + command));
+        }
         return lines.join('\n');
     },
 
@@ -3844,6 +4339,7 @@ const installer = {
         };
         runStage('download', 'Download or reuse repositories', () => this.prepareRepositories(plan, options));
         runStage('rebrand', 'Apply application identity', () => this.rebrandGeneratedApplications(plan, options), REBRAND_STAGE_VERSION);
+        runStage('workspace-manifest', 'Write workspace manifest', () => this.writeWorkspaceManifest(plan, options));
         runStage('vendor-boundary', 'Verify vendor repository boundary', () => this.assertVendorRepositoriesUnmodified(options), VENDOR_BOUNDARY_STAGE_VERSION);
         if (options.executionLevel === 'download') {
             evidence.finishedAt = new Date().toISOString();
@@ -3911,6 +4407,10 @@ const installer = {
     },
 
     printResult: function (options, result, textRenderer) {
+        if (options.outputPath) {
+            const outputPath = path.resolve(options.outputPath);
+            this.writeJsonFile(outputPath, result);
+        }
         console.log(options.json ? JSON.stringify(result, null, 2) : textRenderer(result));
     },
 
@@ -3926,8 +4426,15 @@ const installer = {
             }
             if (check.busy) {
                 lines.push('  fix: stop the process using this local port, or change the local port configuration before start.');
+                if (check.owner && check.owner.summary) {
+                    lines.push('  owner: ' + check.owner.summary.split(/\r?\n/).slice(1).join(' | '));
+                }
             }
         });
+        if (result.fixes) {
+            lines.push('', 'Safe fixes:');
+            result.fixes.fixed.forEach(filePath => lines.push('- ' + filePath));
+        }
         return lines.join('\n');
     },
 
@@ -3942,6 +4449,9 @@ const installer = {
             }
             if (check.busy) {
                 lines.push('  fix: stop the process using this local port, or change the local port configuration before start.');
+                if (check.owner && check.owner.summary) {
+                    lines.push('  owner: ' + check.owner.summary.split(/\r?\n/).slice(1).join(' | '));
+                }
             }
         });
         return lines.join('\n');
@@ -4006,6 +4516,9 @@ const installer = {
         }
         if (options.action === 'doctor') {
             const result = await this.preflight(plan, options);
+            if (options.fix) {
+                result.fixes = this.safeDoctorFixes(plan, options);
+            }
             this.printResult(options, result, doctor => this.renderDoctor(doctor));
             return true;
         }
@@ -4032,6 +4545,39 @@ const installer = {
         if (options.action === 'support-bundle') {
             const result = this.supportBundle(plan, options);
             this.printResult(options, result, bundle => this.renderSupportBundle(bundle));
+            return true;
+        }
+        if (options.action === 'workspace-manifest') {
+            const result = this.writeWorkspaceManifest(plan, options);
+            this.printResult(options, result, manifest => this.renderWorkspaceManifest(manifest));
+            return true;
+        }
+        if (options.action === 'update-vendors') {
+            const result = this.updateVendors(plan, options);
+            this.printResult(options, result, update => this.renderUpdateVendors(update));
+            return true;
+        }
+        if (options.action === 'diff-review') {
+            const result = this.diffReview(plan, options);
+            this.printResult(options, result, diff => this.renderDiffReview(diff));
+            return true;
+        }
+        if (options.action === 'data-readiness') {
+            const result = this.dataReadinessStatus(plan, options);
+            this.printResult(options, result, data => this.renderDataReadiness(data));
+            return true;
+        }
+        if (options.action === 'publishing-check') {
+            const result = this.publishingCheck(plan, options);
+            this.printResult(options, result, publishing => this.renderPublishingCheck(publishing));
+            return true;
+        }
+        if (options.action === 'health') {
+            const result = this.healthCheck(plan, options);
+            if (!result.ok) {
+                process.exitCode = 1;
+            }
+            this.printResult(options, result, health => this.renderHealthCheck(health));
             return true;
         }
         if (options.action === 'troubleshooting') {
@@ -4124,7 +4670,7 @@ const installer = {
                 'Nodics Installer execution completed\nEvidence: ' + execution.evidencePath);
             return true;
         }
-        console.log(options.json ? JSON.stringify(plan, null, 2) : this.renderTextPlan(plan));
+        this.printResult(options, plan, planned => this.renderTextPlan(planned));
         return true;
     }
 };

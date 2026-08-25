@@ -114,12 +114,24 @@ The installer exposes these enterprise inspection and support actions:
 - `upgrade-check` compares `.nodics-installer-lock.json` and
   `acceptance.localBootstrap` with current installer expectations;
 - `support-bundle --yes` writes sanitized evidence, status, and log excerpts,
-  then attempts to create a `.tar.gz` archive;
+  writes a SHA-256 manifest, then attempts to create a `.tar.gz` archive;
 - `self-check` validates installer files, local command readiness, JSON result
-  contracts, and npm/npx readiness without changing package identity.
+  contracts, and npm/npx readiness without changing package identity;
+- `workspace-manifest --yes` writes `.nodics-workspace.json` with generated
+  roots, vendor roots, selected sites, project identity, and installer version;
+- `update-vendors --yes` fetches and fast-forwards only clean `nodics.ai` and
+  `nodics.axis` checkouts;
+- `diff-review` groups Git changes by customer-generated versus vendor-owned
+  roots before repair, support, or upgrade;
+- `data-readiness` checks starter data manifests and local media references;
+- `publishing-check` checks staged/online/process runtime presence plus
+  data/media readiness;
+- `health` checks expected local HTTP URLs after the topology is started;
+- `logs --explain` maps known error signatures to beginner next commands.
 
 Support bundles are local-only. The installer redacts bearer headers, tokens,
 passwords, secrets, and the local home path before writing support evidence.
+The bundle manifest records file sizes and SHA-256 hashes for support handoff.
 
 ## Profiles And Readiness
 
@@ -135,9 +147,51 @@ Plans and evidence now include:
 - database lifecycle policy for retained data versus fresh data;
 - generated/customer/vendor file ownership policy;
 - data seed, publishing, media, and runtime health readiness summaries.
+- OS dependency guidance for macOS, Linux, and Windows/WSL;
+- workspace conflict detection for existing folders, dirty repositories,
+  missing remotes, and unexpected branches;
+- upgrade compatibility matrix for installer, framework, Axis, customer
+  project, lock metadata, and local bootstrap capability drift.
 
 `stable` maps to `master` only when `--release` is not supplied. Explicit branch
 or tag selection remains the source of truth.
+
+## Remote Bootstrap And CI
+
+The public GitHub bootstrap command remains:
+
+```bash
+npx github:Nodics/nodics.installer
+```
+
+The npm package command remains review-only until npm publication is approved:
+
+```bash
+npx @nodics/installer
+```
+
+Maintainers can test the GitHub bootstrap path from outside the repository:
+
+```bash
+npm run smoke:remote -- --workspace=/tmp/nodics-remote-smoke
+```
+
+The smoke script executes `version`, `self-check`, `plan`, and `preflight`
+through `npx github:Nodics/nodics.installer`. GitHub Actions runs tests,
+syntax checks, publish readiness, dry-run packaging, and uploads self-check,
+plan-smoke, and npm-pack JSON artifacts.
+
+## Safe Local Maintenance
+
+Use `update-vendors --yes` only when customer projects are already generated and
+vendor checkouts are clean. The command does not update customer roots.
+
+Use `doctor --fix --yes` only for local installer metadata refresh. It can write
+`.nodics-workspace.json` and missing installer lock metadata, but it does not
+install dependencies, change source code, or patch `nodics.ai` / `nodics.axis`.
+
+Use `--output=/path/setup-plan.json` with `--action=plan --json` when an
+enterprise team wants to review a setup report before any mutating action.
 
 ## Beginner Failure Catalog
 

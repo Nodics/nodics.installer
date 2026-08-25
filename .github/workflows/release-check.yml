@@ -36,7 +36,21 @@ jobs:
         run: npm install
       - name: Test
         run: npm test
+      - name: Syntax check
+        run: node --check src/installer.js
+      - name: Self-check artifact
+        run: node bin/nodics-installer.js --action=self-check --workspace=/tmp/nodics-installer-self-check --json > self-check.json
+      - name: Local smoke artifact
+        run: node bin/nodics-installer.js --action=plan --workspace=/tmp/nodics-installer-plan --application-name=CI --project-name=ci.startio --json > plan-smoke.json
       - name: Publish readiness
         run: npm run publish:check
       - name: Pack smoke test
-        run: npm pack --dry-run
+        run: npm pack --dry-run --json > npm-pack.json
+      - name: Upload release check artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-release-check-node-${{ matrix.node-version }}
+          path: |
+            self-check.json
+            plan-smoke.json
+            npm-pack.json
